@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Root variables */
+:root {
+  --bg-floor: #E8E4DC;
+  --bg-wall: #D4D0C8;
+  --accent-blue: #7BA3C9;
+  --accent-green: #8FBC8F;
+  --accent-coral: #E8A598;
+  --accent-purple: #B8A9C9;
+  --text-dark: #4A4A4A;
+  --highlight: #FFE4B5;
+  --glow: rgba(123, 163, 201, 0.4);
+}
+
+/* Base styles */
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background-color: var(--bg-floor);
+  color: var(--text-dark);
+}
+
+/* Pixel art rendering */
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Custom animation utilities */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes zoom-in-95 {
+  from { transform: scale(0.95); }
+  to { transform: scale(1); }
+}
+
+.animate-in {
+  animation: fade-in 150ms ease-out, zoom-in-95 150ms ease-out;
+}
+
+/* Scrollbar styling for webkit */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-floor);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-wall);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #BFBAB0;
+}
+
+/* Disable text selection on interactive elements */
+button, [role="button"] {
+  user-select: none;
+}
+
+/* Focus styles */
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
