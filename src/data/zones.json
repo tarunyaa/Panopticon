@@ -1,0 +1,6 @@
+{
+  "HOUSE": { "x": 3840, "y": 672, "label": "House" },
+  "WORKSHOP": { "x": 2816, "y": 1632, "label": "Workshop" },
+  "CAFE": { "x": 2528, "y": 800, "label": "Cafe" },
+  "PARK": { "x": 2912, "y": 1056, "label": "Park" }
+}

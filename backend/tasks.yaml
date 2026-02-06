@@ -1,0 +1,35 @@
+plan_task:
+  description: >
+    Analyze the following user request and create a detailed plan with
+    clear steps to accomplish it: {prompt}
+  expected_output: >
+    A numbered list of 3-5 concrete steps to accomplish the task,
+    with brief descriptions of what each step involves.
+  agent: planner
+
+research_task:
+  description: >
+    Based on the plan, research and gather all relevant information
+    needed to accomplish the user's request: {prompt}
+  expected_output: >
+    A comprehensive summary of relevant information, organized by topic,
+    with key findings highlighted.
+  agent: researcher
+
+write_task:
+  description: >
+    Using the plan and research, produce the final written output
+    for the user's request: {prompt}
+  expected_output: >
+    A complete, well-structured response that addresses the user's
+    request with clear formatting and thorough content.
+  agent: writer
+
+review_task:
+  description: >
+    Review the written output for quality, accuracy, and completeness.
+    Make any necessary corrections and provide the final polished version.
+  expected_output: >
+    The final reviewed and polished output, ready for delivery,
+    with any corrections or improvements applied.
+  agent: reviewer

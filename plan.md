@@ -1,6 +1,7 @@
 # Panopticon Phase 3 — "Agent Village" MVP
 
 **Timeline:** 1–2 days
+
 **Promise:** A browser-based top-down village where 3–6 agents move between locations based on CrewAI events. Agents go to HQ/Workshop to work, Cafe to coordinate, House for approvals, and Park when idle. User sees a live feed and can intervene.
 
 ---

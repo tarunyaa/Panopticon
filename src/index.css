@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Root variables */
+/* ── Root variables ── */
 :root {
   --bg-floor: #E8E4DC;
   --bg-wall: #D4D0C8;
@@ -13,71 +13,149 @@
   --text-dark: #4A4A4A;
   --highlight: #FFE4B5;
   --glow: rgba(123, 163, 201, 0.4);
+  --parchment: #D4C8A8;
+  --parchment-light: #E8DCC8;
+  --wood: #A08060;
+  --wood-dark: #6B5040;
+  --wood-light: #C8B080;
+  --ink: #3A2820;
 }
 
-/* Base styles */
+/* ── Base ── */
 html, body, #root {
   height: 100%;
   width: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-family: system-ui, -apple-system, sans-serif;
 }
 
 body {
   background-color: var(--bg-floor);
-  color: var(--text-dark);
+  color: var(--ink);
+  font-family: 'Silkscreen', monospace;
 }
 
-/* Pixel art rendering */
+/* ── Pixel art rendering ── */
 .pixelated {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
 
-/* Custom animation utilities */
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+/* ── Pixel panel — the main window frame ── */
+.pixel-panel {
+  background: var(--parchment-light);
+  border: 3px solid var(--wood-dark);
+  box-shadow:
+    inset 2px 2px 0 var(--parchment-light),
+    inset -2px -2px 0 var(--wood-light),
+    4px 4px 0 rgba(58, 40, 32, 0.25);
 }
 
-@keyframes zoom-in-95 {
-  from { transform: scale(0.95); }
-  to { transform: scale(1); }
+/* ── Inset panel — recessed area inside the frame ── */
+.pixel-inset {
+  background: var(--parchment);
+  border: 2px solid var(--wood-dark);
+  box-shadow:
+    inset 2px 2px 0 var(--wood-light),
+    inset -1px -1px 0 var(--parchment-light);
 }
 
-.animate-in {
-  animation: fade-in 150ms ease-out, zoom-in-95 150ms ease-out;
+/* ── Pixel button — raised, chunky ── */
+.pixel-btn {
+  border: 2px solid var(--wood-dark);
+  background: var(--parchment-light);
+  box-shadow:
+    inset -2px -2px 0 var(--wood-light),
+    inset 2px 2px 0 #F0E8D8,
+    2px 2px 0 rgba(58, 40, 32, 0.2);
+  cursor: pointer;
+  transition: none;
+}
+.pixel-btn:hover {
+  background: #F0E8D8;
+}
+.pixel-btn:active, .pixel-btn-pressed {
+  background: var(--parchment);
+  box-shadow:
+    inset 2px 2px 0 var(--wood-light),
+    inset -2px -2px 0 var(--parchment-light);
+  transform: translate(1px, 1px);
+}
+.pixel-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pixel-btn:disabled:hover {
+  background: var(--parchment-light);
 }
 
-/* Scrollbar styling for webkit */
+/* ── Pixel chip — smaller raised element ── */
+.pixel-chip {
+  border: 2px solid var(--wood-dark);
+  background: var(--parchment-light);
+  box-shadow:
+    inset -1px -1px 0 var(--wood-light),
+    inset 1px 1px 0 #F0E8D8;
+}
+
+/* ── Pixel separator — hard 2px line ── */
+.pixel-sep {
+  height: 2px;
+  background: var(--wood-dark);
+  box-shadow: 0 1px 0 var(--parchment-light);
+}
+
+/* ── Dither texture overlay ── */
+.pixel-dither {
+  position: relative;
+}
+.pixel-dither::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  pointer-events: none;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVQIW2P4z8DwHwMDAwMAGOoD/TF2MIQAAAAASUVORK5CYII=");
+  background-repeat: repeat;
+  image-rendering: pixelated;
+}
+
+/* ── Scrollbar — pixel style ── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
-
 ::-webkit-scrollbar-track {
-  background: var(--bg-floor);
+  background: var(--parchment);
+  border-left: 2px solid var(--wood-dark);
 }
-
 ::-webkit-scrollbar-thumb {
-  background: var(--bg-wall);
-  border-radius: 4px;
+  background: var(--wood-light);
+  border: 2px solid var(--wood-dark);
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #BFBAB0;
+  background: var(--wood);
 }
 
-/* Disable text selection on interactive elements */
+/* ── Text selection ── */
 button, [role="button"] {
   user-select: none;
 }
 
-/* Focus styles */
+/* ── Focus — hard pixel outline ── */
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--accent-blue);
-  outline-offset: 2px;
+  outline-offset: 0px;
+}
+
+/* ── Spinner ── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 0.7s linear infinite;
 }
