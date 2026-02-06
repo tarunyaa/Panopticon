@@ -3,7 +3,7 @@ import { useWorldState } from '../../state/WorldState';
 import { events } from '../../state/events';
 
 /**
- * Login scene - email input with org fallback to "Acme"
+ * Login scene - pixel-art styled
  */
 export function LoginScene() {
   const { dispatch, transitionTo } = useWorldState();
@@ -15,48 +15,39 @@ export function LoginScene() {
     if (!email.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
-
-    // Login (will parse org from email, fallback to Acme)
     dispatch(events.login(email.trim()));
-
-    // Small delay for visual feedback, then transition
     await new Promise(resolve => setTimeout(resolve, 200));
-
-    // Transition to world
     transitionTo('world');
   };
 
   return (
-    <div className="min-h-screen bg-floor flex items-center justify-center p-4">
-      <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-8 w-full max-w-sm">
-        {/* Logo placeholder - pixel art style */}
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: '#E8DCC8' }}>
+      <div
+        className="bg-white p-8 w-full max-w-sm"
+        style={{
+          border: '2px solid #2B2B2B',
+          boxShadow: '3px 3px 0 rgba(0, 0, 0, 0.2)',
+        }}
+      >
+        {/* Pixel-art building icon */}
         <div className="flex justify-center mb-6">
-          <div className="relative">
-            {/* Simple pixel building icon */}
-            <div className="w-16 h-16 relative" style={{ imageRendering: 'pixelated' }}>
-              {/* Building base */}
-              <div className="absolute bottom-0 left-2 right-2 h-12 bg-accent-blue rounded-t" />
-              {/* Windows */}
-              <div className="absolute bottom-8 left-4 w-2 h-2 bg-highlight" />
-              <div className="absolute bottom-8 right-4 w-2 h-2 bg-highlight" />
-              <div className="absolute bottom-4 left-4 w-2 h-2 bg-highlight" />
-              <div className="absolute bottom-4 right-4 w-2 h-2 bg-highlight" />
-              {/* Door */}
-              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3 h-4 bg-text-dark rounded-t" />
-              {/* Roof */}
-              <div
-                className="absolute top-2 left-0 right-0 h-4"
-                style={{
-                  background: 'linear-gradient(135deg, transparent 50%, #7BA3C9 50%)',
-                }}
-              />
-            </div>
-
+          <svg width="64" height="64" viewBox="0 0 32 32" fill="none">
+            {/* Building base */}
+            <rect x="8" y="14" width="16" height="14" fill="#5088C0" stroke="#2B2B2B" strokeWidth="1" />
+            {/* Roof - stacked narrowing rects */}
+            <rect x="6" y="12" width="20" height="3" fill="#385898" stroke="#2B2B2B" strokeWidth="1" />
+            <rect x="10" y="8" width="12" height="5" fill="#385898" stroke="#2B2B2B" strokeWidth="1" />
+            {/* Windows */}
+            <rect x="10" y="17" width="3" height="3" fill="#FFD050" />
+            <rect x="19" y="17" width="3" height="3" fill="#FFD050" />
+            <rect x="10" y="22" width="3" height="3" fill="#FFD050" />
+            <rect x="19" y="22" width="3" height="3" fill="#FFD050" />
+            {/* Door */}
+            <rect x="14" y="22" width="4" height="6" fill="#2B2B2B" />
             {/* Eye/camera on top */}
-            <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-4 h-4 bg-accent-purple rounded-full border-2 border-white flex items-center justify-center">
-              <div className="w-1.5 h-1.5 bg-text-dark rounded-full" />
-            </div>
-          </div>
+            <rect x="14" y="4" width="4" height="4" fill="#A070C0" stroke="#2B2B2B" strokeWidth="1" />
+            <rect x="15" y="5" width="2" height="2" fill="#2B2B2B" />
+          </svg>
         </div>
 
         {/* Title */}
@@ -77,25 +68,25 @@ export function LoginScene() {
               placeholder="name@company.com"
               required
               autoFocus
-              className="w-full px-4 py-3 rounded-lg border border-wall
-                focus:border-accent-blue focus:ring-2 focus:ring-accent-blue/20
-                outline-none transition-all duration-150
-                text-text-dark placeholder:text-text-dark/40
-                text-sm font-mono"
+              className="w-full px-4 py-3 outline-none text-text-dark placeholder:text-text-dark/40 text-sm font-mono"
+              style={{
+                border: '2px solid #2B2B2B',
+                backgroundColor: '#F8F0E0',
+              }}
             />
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting || !email.trim()}
-            className={`
-              w-full py-3 rounded-lg font-medium text-sm
-              transition-all duration-150
-              ${isSubmitting || !email.trim()
-                ? 'bg-wall text-text-dark/40 cursor-not-allowed'
-                : 'bg-accent-blue text-white hover:bg-accent-blue/90 hover:scale-[1.02] active:scale-[0.98]'
-              }
-            `}
+            className="w-full py-3 font-medium text-sm transition-colors"
+            style={{
+              border: '2px solid #2B2B2B',
+              backgroundColor: isSubmitting || !email.trim() ? '#D0C8B8' : '#5088C0',
+              color: isSubmitting || !email.trim() ? '#4A4A4A' : 'white',
+              boxShadow: isSubmitting || !email.trim() ? 'none' : '2px 2px 0 rgba(0,0,0,0.2)',
+              cursor: isSubmitting || !email.trim() ? 'not-allowed' : 'pointer',
+            }}
           >
             {isSubmitting ? 'Entering...' : 'Enter'}
           </button>
@@ -103,7 +94,7 @@ export function LoginScene() {
 
         {/* Hint */}
         <p className="text-center text-[10px] text-text-dark/40 mt-4">
-          Any email works • Unknown domains → Acme Corp
+          {'Any email works \u2022 Unknown domains \u2192 Acme Corp'}
         </p>
       </div>
     </div>

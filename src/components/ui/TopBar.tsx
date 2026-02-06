@@ -5,8 +5,12 @@ interface TopBarProps {
   showNav?: boolean;
 }
 
+const iconHome = new URL('../../assets/ui/icon_home.png', import.meta.url).href;
+const iconPeople = new URL('../../assets/ui/icon_people.png', import.meta.url).href;
+const iconClose = new URL('../../assets/ui/icon_close.png', import.meta.url).href;
+
 /**
- * Top bar with minimal icons: home, back, settings, sound toggle
+ * Top bar with minimal pixel-art icons: home, back, settings, sound toggle
  */
 export function TopBar({ showNav = true }: TopBarProps) {
   const { state, transitionTo } = useWorldState();
@@ -16,9 +20,9 @@ export function TopBar({ showNav = true }: TopBarProps) {
   const canGoHome = scene !== 'login' && scene !== 'world';
 
   const handleBack = () => {
-    if (scene === 'pod') {
-      transitionTo('org', state.orgId ?? undefined);
-    } else if (scene === 'org') {
+    if (scene === 'room' || scene === 'pod') {
+      transitionTo('building', state.buildingId ?? state.orgId ?? undefined);
+    } else if (scene === 'building' || scene === 'org') {
       transitionTo('world');
     }
   };
@@ -38,14 +42,14 @@ export function TopBar({ showNav = true }: TopBarProps) {
               onClick={handleHome}
               disabled={!canGoHome}
               className={`
-                w-8 h-8 rounded-lg flex items-center justify-center
-                bg-white/90 backdrop-blur-sm shadow-sm
-                transition-all duration-150
-                ${canGoHome ? 'hover:bg-white hover:scale-105 cursor-pointer' : 'opacity-40 cursor-not-allowed'}
+                w-8 h-8 flex items-center justify-center
+                bg-white/90 border-2 border-[#2B2B2B] rounded-md
+                transition-colors duration-150
+                ${canGoHome ? 'hover:bg-[#FFD050] cursor-pointer' : 'opacity-40 cursor-not-allowed'}
               `}
               title="Home"
             >
-              <HomeIcon />
+              <img src={iconHome} alt="" width={16} height={16} style={{ imageRendering: 'pixelated' }} />
             </button>
 
             {/* Back button */}
@@ -53,14 +57,24 @@ export function TopBar({ showNav = true }: TopBarProps) {
               onClick={handleBack}
               disabled={!canGoBack}
               className={`
-                w-8 h-8 rounded-lg flex items-center justify-center
-                bg-white/90 backdrop-blur-sm shadow-sm
-                transition-all duration-150
-                ${canGoBack ? 'hover:bg-white hover:scale-105 cursor-pointer' : 'opacity-40 cursor-not-allowed'}
+                w-8 h-8 flex items-center justify-center
+                bg-white/90 border-2 border-[#2B2B2B] rounded-md
+                transition-colors duration-150
+                ${canGoBack ? 'hover:bg-[#FFD050] cursor-pointer' : 'opacity-40 cursor-not-allowed'}
               `}
               title="Back"
             >
-              <BackIcon />
+              <img src={iconClose} alt="" width={16} height={16} style={{ imageRendering: 'pixelated' }} />
+            </button>
+
+            {/* People button (decorative for now) */}
+            <button
+              className="w-8 h-8 flex items-center justify-center
+                bg-white/90 border-2 border-[#2B2B2B] rounded-md
+                hover:bg-[#FFD050] transition-colors duration-150"
+              title="Team"
+            >
+              <img src={iconPeople} alt="" width={16} height={16} style={{ imageRendering: 'pixelated' }} />
             </button>
           </>
         )}
@@ -69,8 +83,10 @@ export function TopBar({ showNav = true }: TopBarProps) {
       {/* Center: Scene indicator (minimal) */}
       <div className="absolute left-1/2 -translate-x-1/2">
         {scene !== 'login' && (
-          <div className="text-xs font-mono text-text-dark/50 bg-white/60 px-2 py-0.5 rounded">
+        <div className="text-xs font-mono text-text-dark bg-white/90 border-2 border-[#2B2B2B] px-2 py-0.5 rounded-md shadow-soft">
             {scene === 'world' && 'Campus'}
+            {scene === 'building' && (state.buildingId ?? 'Building')}
+            {scene === 'room' && (state.roomId?.split('-').pop() ?? 'Room')}
             {scene === 'org' && state.orgId}
             {scene === 'pod' && state.podId?.split('-').pop()}
           </div>
@@ -83,21 +99,21 @@ export function TopBar({ showNav = true }: TopBarProps) {
           <LiveFeed data={liveFeed} />
         )}
 
-        {/* Settings placeholder */}
+        {/* Settings */}
         <button
-          className="w-8 h-8 rounded-lg flex items-center justify-center
-            bg-white/90 backdrop-blur-sm shadow-sm
-            hover:bg-white hover:scale-105 transition-all duration-150"
+          className="w-8 h-8 flex items-center justify-center
+            bg-white/90 border-2 border-[#2B2B2B] rounded-md
+            hover:bg-[#FFD050] transition-colors duration-150"
           title="Settings"
         >
           <SettingsIcon />
         </button>
 
-        {/* Sound toggle placeholder */}
+        {/* Sound toggle */}
         <button
-          className="w-8 h-8 rounded-lg flex items-center justify-center
-            bg-white/90 backdrop-blur-sm shadow-sm
-            hover:bg-white hover:scale-105 transition-all duration-150"
+          className="w-8 h-8 flex items-center justify-center
+            bg-white/90 border-2 border-[#2B2B2B] rounded-md
+            hover:bg-[#FFD050] transition-colors duration-150"
           title="Sound (placeholder)"
         >
           <SoundIcon />
@@ -107,37 +123,38 @@ export function TopBar({ showNav = true }: TopBarProps) {
   );
 }
 
-// Simple pixel-style icons
-function HomeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <path d="M8 2L2 7V14H6V10H10V14H14V7L8 2Z" fill="#4A4A4A" />
-    </svg>
-  );
-}
-
-function BackIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <path d="M10 3L5 8L10 13" stroke="#4A4A4A" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function SettingsIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="2" fill="#4A4A4A" />
-      <path d="M8 1V3M8 13V15M1 8H3M13 8H15M3 3L4.5 4.5M11.5 11.5L13 13M3 13L4.5 11.5M11.5 4.5L13 3" stroke="#4A4A4A" strokeWidth="1.5" />
+    <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" style={{ shapeRendering: 'crispEdges' }}>
+      {/* Gear shape - pixel cross + center */}
+      <rect x="6" y="1" width="4" height="2" fill="#2B2B2B" />
+      <rect x="6" y="13" width="4" height="2" fill="#2B2B2B" />
+      <rect x="1" y="6" width="2" height="4" fill="#2B2B2B" />
+      <rect x="13" y="6" width="2" height="4" fill="#2B2B2B" />
+      {/* Diagonal teeth */}
+      <rect x="3" y="3" width="2" height="2" fill="#2B2B2B" />
+      <rect x="11" y="3" width="2" height="2" fill="#2B2B2B" />
+      <rect x="3" y="11" width="2" height="2" fill="#2B2B2B" />
+      <rect x="11" y="11" width="2" height="2" fill="#2B2B2B" />
+      {/* Center body */}
+      <rect x="4" y="4" width="8" height="8" fill="#2B2B2B" />
+      {/* Center hole */}
+      <rect x="6" y="6" width="4" height="4" fill="#E8E2D6" />
     </svg>
   );
 }
 
 function SoundIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <path d="M3 6H1V10H3L7 13V3L3 6Z" fill="#4A4A4A" />
-      <path d="M10 5C11.5 6 11.5 10 10 11M12 3C15 5 15 11 12 13" stroke="#4A4A4A" strokeWidth="1.5" strokeLinecap="round" />
+    <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" style={{ shapeRendering: 'crispEdges' }}>
+      {/* Speaker body */}
+      <rect x="2" y="6" width="3" height="4" fill="#2B2B2B" />
+      {/* Speaker cone */}
+      <rect x="5" y="4" width="2" height="8" fill="#2B2B2B" />
+      <rect x="7" y="3" width="1" height="10" fill="#2B2B2B" />
+      {/* Sound waves (rect bars) */}
+      <rect x="10" y="5" width="1" height="6" fill="#2B2B2B" />
+      <rect x="12" y="3" width="1" height="10" fill="#2B2B2B" />
     </svg>
   );
 }

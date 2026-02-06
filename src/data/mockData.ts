@@ -1,16 +1,174 @@
-import type { Organization, LiveFeedData, Agent } from '../types';
+import type {
+  Organization,
+  LiveFeedData,
+  Agent,
+  Building,
+  Room,
+  Character,
+} from '../types';
+
+// ============================================
+// NEW BUILDING/CHARACTER DATA
+// ============================================
+
+/**
+ * Buildings in the world (unlabeled, identified by silhouette)
+ */
+export const buildings: Building[] = [
+  {
+    id: 'hub-main',
+    type: 'hub',
+    position: { x: 170, y: 170 },
+    rooms: [
+      {
+        id: 'hub-lobby',
+        position: { x: 200, y: 150 },
+        characters: [
+          { id: 'char-001', name: 'Alex', isAI: false, status: 'idle', position: { x: 100, y: 200 } },
+          { id: 'char-002', name: 'Jordan', isAI: true, aiHint: 'sparkle', status: 'working', position: { x: 200, y: 180 } },
+        ],
+      },
+      {
+        id: 'hub-lounge',
+        position: { x: 350, y: 150 },
+        characters: [
+          { id: 'char-003', name: 'Sam', isAI: true, aiHint: 'pulse', status: 'done', position: { x: 150, y: 220 } },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'workshop-1',
+    type: 'workshop',
+    position: { x: 470, y: 175 },
+    rooms: [
+      {
+        id: 'workshop-floor',
+        position: { x: 200, y: 150 },
+        characters: [
+          { id: 'char-004', name: 'Riley', isAI: false, status: 'working', position: { x: 120, y: 200 } },
+          { id: 'char-005', name: 'Casey', isAI: true, aiHint: 'sparkle', status: 'working', position: { x: 280, y: 180 } },
+          { id: 'char-006', name: 'Morgan', isAI: false, status: 'waiting', position: { x: 200, y: 250 } },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'library-1',
+    type: 'library',
+    position: { x: 720, y: 190 },
+    rooms: [
+      {
+        id: 'library-reading',
+        position: { x: 200, y: 150 },
+        characters: [
+          { id: 'char-007', name: 'Quinn', isAI: true, aiHint: 'pulse', status: 'idle', position: { x: 150, y: 200 } },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'cafe-1',
+    type: 'cafe',
+    position: { x: 220, y: 420 },
+    rooms: [
+      {
+        id: 'cafe-floor',
+        position: { x: 200, y: 150 },
+        characters: [
+          { id: 'char-008', name: 'Taylor', isAI: false, status: 'idle', position: { x: 100, y: 200 } },
+          { id: 'char-009', name: 'Avery', isAI: true, aiHint: 'sparkle', status: 'done', position: { x: 250, y: 180 } },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'greenhouse-1',
+    type: 'greenhouse',
+    position: { x: 480, y: 420 },
+    rooms: [
+      {
+        id: 'greenhouse-floor',
+        position: { x: 200, y: 150 },
+        characters: [
+          { id: 'char-010', name: 'Drew', isAI: false, status: 'working', position: { x: 180, y: 200 } },
+          { id: 'char-011', name: 'Blake', isAI: true, aiHint: 'pulse', status: 'working', position: { x: 280, y: 220 } },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'postoffice-1',
+    type: 'postoffice',
+    position: { x: 740, y: 420 },
+    rooms: [
+      {
+        id: 'postoffice-counter',
+        position: { x: 200, y: 150 },
+        characters: [
+          { id: 'char-012', name: 'Reese', isAI: true, aiHint: 'sparkle', status: 'waiting', position: { x: 200, y: 200 } },
+        ],
+      },
+    ],
+  },
+];
+
+/**
+ * All characters (for lookup)
+ */
+export const allCharacters: Character[] = buildings.flatMap(b =>
+  b.rooms.flatMap(r => r.characters)
+);
+
+/**
+ * Get building by ID
+ */
+export function getBuilding(buildingId: string): Building | undefined {
+  return buildings.find(b => b.id === buildingId);
+}
+
+/**
+ * Get room by ID
+ */
+export function getRoom(roomId: string): { building: Building; room: Room } | undefined {
+  for (const building of buildings) {
+    const room = building.rooms.find(r => r.id === roomId);
+    if (room) return { building, room };
+  }
+  return undefined;
+}
+
+/**
+ * Get character by ID
+ */
+export function getCharacter(characterId: string): Character | undefined {
+  return allCharacters.find(c => c.id === characterId);
+}
+
+/**
+ * Ambient NPCs for world scene (not in any building)
+ */
+export const worldNPCs: Character[] = [
+  { id: 'npc-001', name: '', isAI: false, status: 'idle', position: { x: 300, y: 280 } },
+  { id: 'npc-002', name: '', isAI: true, aiHint: 'pulse', status: 'working', position: { x: 520, y: 320 } },
+  { id: 'npc-003', name: '', isAI: false, status: 'idle', position: { x: 280, y: 500 } },
+];
+
+// ============================================
+// LEGACY DATA (keeping for backwards compatibility)
+// ============================================
 
 // Known organizations mapped by email domain
 export const orgsByDomain: Record<string, string> = {
-  'acme.com': 'acme',
-  'techcorp.io': 'techcorp',
-  'startup.dev': 'startup',
+  'acme.com': 'hub-main',
+  'techcorp.io': 'workshop-1',
+  'startup.dev': 'cafe-1',
 };
 
 // Default org for unknown domains
-export const DEFAULT_ORG_ID = 'acme';
+export const DEFAULT_ORG_ID = 'hub-main';
 
-// Mock organizations with their pods
+// Mock organizations with their pods (LEGACY - maps to buildings)
 export const organizations: Organization[] = [
   {
     id: 'acme',
@@ -81,18 +239,24 @@ export const organizations: Organization[] = [
   },
 ];
 
-// Get user's default pod (first pod in their org)
+// Get user's default building (first room in first building)
+export function getDefaultRoom(buildingId: string): string {
+  const building = getBuilding(buildingId);
+  return building?.rooms[0]?.id ?? 'hub-lobby';
+}
+
+// Get user's default pod (LEGACY)
 export function getDefaultPod(orgId: string): string {
   const org = organizations.find(o => o.id === orgId);
   return org?.pods[0]?.id ?? 'acme-pod-1';
 }
 
-// Get organization by ID
+// Get organization by ID (LEGACY)
 export function getOrganization(orgId: string): Organization | undefined {
   return organizations.find(o => o.id === orgId);
 }
 
-// Get pod by ID
+// Get pod by ID (LEGACY)
 export function getPod(podId: string): { org: Organization; pod: typeof organizations[0]['pods'][0] } | undefined {
   for (const org of organizations) {
     const pod = org.pods.find(p => p.id === podId);
@@ -101,7 +265,7 @@ export function getPod(podId: string): { org: Organization; pod: typeof organiza
   return undefined;
 }
 
-// Get agent by ID
+// Get agent by ID (LEGACY)
 export function getAgent(agentId: string): Agent | undefined {
   for (const org of organizations) {
     for (const pod of org.pods) {
@@ -120,7 +284,7 @@ export const mockLiveFeed: LiveFeedData = {
   blockedReason: 'Waiting for API key',
 };
 
-// Manager agent (appears in every pod)
+// Manager agent (appears in every pod) - LEGACY
 export const managerAgent: Agent = {
   id: 'manager-ai',
   name: 'AI Manager',

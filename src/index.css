@@ -2,17 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Root variables */
+/* Root variables - pixel-art palette */
 :root {
-  --bg-floor: #E8E4DC;
-  --bg-wall: #D4D0C8;
-  --accent-blue: #7BA3C9;
-  --accent-green: #8FBC8F;
-  --accent-coral: #E8A598;
-  --accent-purple: #B8A9C9;
-  --text-dark: #4A4A4A;
-  --highlight: #FFE4B5;
-  --glow: rgba(123, 163, 201, 0.4);
+  --bg-floor: #E8DCC8;
+  --bg-floor-warm: #F0E8D8;
+  --bg-wall: #D0C8B8;
+
+  /* Pixel palette accents */
+  --accent-blue: #5088C0;
+  --accent-green: #60A060;
+  --accent-coral: #E07050;
+  --accent-purple: #A070C0;
+  --accent-yellow: #FFD050;
+  --accent-teal: #50B8B8;
+
+  /* Text */
+  --text-dark: #2B2B2B;
+  --text-light: #4A4A4A;
+  --highlight: #FFD050;
+
+  /* Shadows - flat pixel style (no blur) */
+  --shadow-soft: 2px 2px 0 rgba(0, 0, 0, 0.15);
+  --shadow-lg: 3px 3px 0 rgba(0, 0, 0, 0.2);
 }
 
 /* Base styles */
@@ -22,21 +33,43 @@ html, body, #root {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 body {
   background-color: var(--bg-floor);
   color: var(--text-dark);
+  /* Keep body text anti-aliased for readability */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Pixel art rendering */
-.pixelated {
+/* Pixel rendering for all game SVGs and images */
+svg {
+  shape-rendering: crispEdges;
+}
+
+img, svg {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
 
-/* Custom animation utilities */
+/* Flat pixel shadow utility */
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+
+.shadow-soft-lg {
+  box-shadow: var(--shadow-lg);
+}
+
+/* steps(2) pop-in for pixel feel */
+@keyframes pixel-pop-in {
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -48,10 +81,27 @@ body {
 }
 
 .animate-in {
-  animation: fade-in 150ms ease-out, zoom-in-95 150ms ease-out;
+  animation: pixel-pop-in 200ms steps(2) forwards;
 }
 
-/* Scrollbar styling for webkit */
+.animate-scale-in {
+  animation: pixel-pop-in 200ms steps(2) forwards;
+}
+
+/* Building hover ring - pixel style with solid outline */
+.building-hover-ring {
+  position: absolute;
+  inset: -4px;
+  border: 2px solid transparent;
+  transition: border-color 0.1s;
+  pointer-events: none;
+}
+
+.group:hover .building-hover-ring {
+  border-color: #FFD050;
+}
+
+/* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -63,11 +113,10 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--bg-wall);
-  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #BFBAB0;
+  background: #B0A898;
 }
 
 /* Disable text selection on interactive elements */
@@ -80,4 +129,66 @@ button:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--accent-blue);
   outline-offset: 2px;
+}
+
+/* Emoji status bubble */
+.status-emoji {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* SVG building styles - pixel art, no blur shadows */
+.building-svg {
+  transition: transform 0.1s;
+}
+
+.building-svg:hover {
+  transform: translateY(-2px);
+}
+
+/* AI hint sparkle - pixel diamond shape */
+.ai-sparkle {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+}
+
+.ai-sparkle::before {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: #FFD050;
+  transform: rotate(45deg);
+  animation: pixel-sparkle 3s steps(4) infinite;
+}
+
+/* Tile floor pattern utilities */
+.tile-floor-16 {
+  background-image:
+    linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.tile-floor-32 {
+  background-image:
+    linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Pixel-style transitions for interactive elements */
+.interactive {
+  transition: transform 0.1s;
+}
+
+.interactive:hover {
+  transform: translateY(-2px);
+}
+
+.interactive:active {
+  transform: translateY(0);
 }

@@ -24,6 +24,17 @@ export const events = {
     position,
   }),
 
+  // New character card events
+  openCharacterCard: (characterId: string): AppEvent => ({
+    type: 'OPEN_CHARACTER_CARD',
+    characterId,
+  }),
+
+  closeCharacterCard: (): AppEvent => ({
+    type: 'CLOSE_CHARACTER_CARD',
+  }),
+
+  // Legacy agent card events (alias to character)
   openAgentCard: (agentId: string): AppEvent => ({
     type: 'OPEN_AGENT_CARD',
     agentId,
@@ -33,7 +44,7 @@ export const events = {
     type: 'CLOSE_AGENT_CARD',
   }),
 
-  setCamera: (camera: Partial<{ x: number; y: number; zoom: 1 | 1.5 }>): AppEvent => ({
+  setCamera: (camera: Partial<{ x: number; y: number; zoom: number }>): AppEvent => ({
     type: 'SET_CAMERA',
     camera,
   }),

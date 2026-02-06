@@ -161,7 +161,7 @@ export function PlaceholderSprite({
 
       {/* Head */}
       <div
-        className="absolute rounded-full"
+        className="absolute "
         style={{
           backgroundColor: '#F5DEB3', // skin tone
           width: scaledWidth * 0.6,
@@ -174,7 +174,7 @@ export function PlaceholderSprite({
         {hasEyes && !blinking && (
           <>
             <div
-              className="absolute bg-text-dark rounded-full"
+              className="absolute bg-text-dark "
               style={{
                 width: scaledWidth * 0.1,
                 height: scaledHeight * 0.08,
@@ -183,7 +183,7 @@ export function PlaceholderSprite({
               }}
             />
             <div
-              className="absolute bg-text-dark rounded-full"
+              className="absolute bg-text-dark "
               style={{
                 width: scaledWidth * 0.1,
                 height: scaledHeight * 0.08,

@@ -18,7 +18,7 @@ const typeColors: Record<CharacterType, string> = {
 };
 
 /**
- * Agent card popup - shows when clicking an agent in pod view
+ * Agent card popup - pixel-art styled, shows when clicking an agent in pod view
  */
 export function AgentCard() {
   const { state, dispatch } = useWorldState();
@@ -47,20 +47,25 @@ export function AgentCard() {
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/20" />
 
-      {/* Card */}
+      {/* Card - sharp pixel box, flat shadow, pixel-pop-in animation */}
       <div
-        className="relative bg-white rounded-xl shadow-xl p-4 min-w-[160px]
-          animate-in fade-in zoom-in-95 duration-150"
-        style={{ imageRendering: 'auto' }}
+        className="relative bg-white p-4 min-w-[160px]"
+        style={{
+          imageRendering: 'auto',
+          border: '2px solid #2B2B2B',
+          boxShadow: '2px 2px 0 rgba(0,0,0,0.15)',
+          animation: 'pixel-pop-in 300ms steps(2) both',
+        }}
       >
-        {/* Close button */}
+        {/* Close button - sharp rect, not rounded */}
         <button
           onClick={handleClose}
-          className="absolute -top-2 -right-2 w-6 h-6 bg-wall rounded-full
+          className="absolute -top-2 -right-2 w-6 h-6 bg-wall
             flex items-center justify-center text-text-dark hover:bg-gray-300
             transition-colors"
+          style={{ border: '2px solid #2B2B2B' }}
         >
-          <span className="text-sm">×</span>
+          <span className="text-sm leading-none">x</span>
         </button>
 
         {/* Avatar */}
@@ -86,15 +91,24 @@ export function AgentCard() {
             {agent.role}
           </div>
 
-          {/* Status */}
+          {/* Status - square dot instead of rounded */}
           <div className="flex items-center justify-center gap-1.5">
-            <div className={`w-2 h-2 rounded-full ${statusColors[agent.status]}`} />
+            <div className={`w-2 h-2 ${statusColors[agent.status]}`} />
             <span className="text-xs text-text-dark/70 capitalize">
               {agent.status}
             </span>
           </div>
         </div>
       </div>
+
+      {/* Keyframes for pixel-pop-in animation */}
+      <style>{`
+        @keyframes pixel-pop-in {
+          0% { transform: scale(0); opacity: 0; }
+          50% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

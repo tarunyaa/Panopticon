@@ -1,15 +1,19 @@
 import { createContext, useContext, useReducer, useCallback, useRef, type ReactNode } from 'react';
 import type { WorldState, AppEvent, SceneType, FocusPoint, CameraState } from '../types';
-import { parseOrgFromEmail, parseNameFromEmail, getDefaultPod, mockLiveFeed } from '../data/mockData';
+import { parseOrgFromEmail, parseNameFromEmail, getDefaultRoom, mockLiveFeed } from '../data/mockData';
 
 // Initial state
 const initialState: WorldState = {
   scene: 'login',
+  buildingId: null,
+  roomId: null,
+  // Legacy aliases
   orgId: null,
   podId: null,
   user: null,
   camera: { x: 0, y: 0, zoom: 1 },
-  selectedAgentId: null,
+  selectedCharacterId: null,
+  selectedAgentId: null, // Legacy alias
   liveFeed: mockLiveFeed,
   transition: {
     isTransitioning: false,
@@ -24,18 +28,21 @@ const initialState: WorldState = {
 function reducer(state: WorldState, event: AppEvent): WorldState {
   switch (event.type) {
     case 'LOGIN': {
-      const orgId = parseOrgFromEmail(event.email);
-      const podId = getDefaultPod(orgId);
+      const buildingId = parseOrgFromEmail(event.email);
+      const roomId = getDefaultRoom(buildingId);
       return {
         ...state,
         user: {
           email: event.email,
           name: parseNameFromEmail(event.email),
-          orgId,
-          podId,
+          buildingId,
+          roomId,
         },
-        orgId,
-        podId,
+        buildingId,
+        roomId,
+        // Legacy aliases
+        orgId: buildingId,
+        podId: roomId,
       };
     }
 
@@ -44,27 +51,57 @@ function reducer(state: WorldState, event: AppEvent): WorldState {
         ...initialState,
       };
 
-    case 'NAVIGATE':
-      return {
-        ...state,
-        scene: event.scene,
-        orgId: event.scene === 'org' || event.scene === 'pod' ? (event.targetId ?? state.orgId) : state.orgId,
-        podId: event.scene === 'pod' ? (event.targetId ?? state.podId) : state.podId,
-        selectedAgentId: null,
-      };
+    case 'NAVIGATE': {
+      const newState = { ...state };
+
+      // Handle both new and legacy scene types
+      if (event.scene === 'building' || event.scene === 'org') {
+        newState.scene = 'building';
+        newState.buildingId = event.targetId ?? state.buildingId;
+        newState.orgId = newState.buildingId; // Legacy alias
+      } else if (event.scene === 'room' || event.scene === 'pod') {
+        newState.scene = 'room';
+        newState.roomId = event.targetId ?? state.roomId;
+        newState.podId = newState.roomId; // Legacy alias
+      } else {
+        newState.scene = event.scene;
+      }
+
+      newState.selectedCharacterId = null;
+      newState.selectedAgentId = null;
+
+      return newState;
+    }
 
     case 'CLICK_ENTITY':
       return state;
 
+    case 'OPEN_CHARACTER_CARD':
+      return {
+        ...state,
+        selectedCharacterId: event.characterId,
+        selectedAgentId: event.characterId, // Legacy alias
+      };
+
+    case 'CLOSE_CHARACTER_CARD':
+      return {
+        ...state,
+        selectedCharacterId: null,
+        selectedAgentId: null,
+      };
+
+    // Legacy events
     case 'OPEN_AGENT_CARD':
       return {
         ...state,
+        selectedCharacterId: event.agentId,
         selectedAgentId: event.agentId,
       };
 
     case 'CLOSE_AGENT_CARD':
       return {
         ...state,
+        selectedCharacterId: null,
         selectedAgentId: null,
       };
 
