@@ -1,31 +1,12 @@
-isabella_task:
-  description: Coordinate team members and ensure objectives are met.
-  expected_output: Successful team coordination and project completion.
-  agent: isabella
-abigail_task:
-  description: 'Analyze the following request and produce a detailed architecture
-    design with component breakdown, data flow diagrams, API contracts, and technology
-    recommendations: {prompt}'
-  expected_output: A complete architecture document including system overview, component
-    diagram, API specifications, data models, and technology stack recommendations
-    with rationale.
-  agent: abigail
-carlos_task:
-  description: 'Design and implement the backend services, API endpoints, and database
-    models for the following request: {prompt}'
-  expected_output: Complete backend implementation plan with API endpoint definitions,
-    request/response schemas, database models, error handling strategy, and sample
-    code.
-  agent: carlos
-klaus_task:
-  description: 'Design and build the frontend UI components, user flows, and client-side
-    logic for the following request: {prompt}'
-  expected_output: Frontend implementation plan with component hierarchy, state management
-    approach, UI mockup descriptions, and sample component code with styling.
-  agent: klaus
-ayesha_task:
-  description: 'Create a comprehensive test plan and write test cases covering all
-    critical paths, edge cases, and failure modes for the following request: {prompt}'
-  expected_output: Complete test strategy with unit test cases, integration test scenarios,
-    edge case coverage, and a quality validation checklist.
-  agent: ayesha
+backend_implementation_task:
+  description: 'Implement backend APIs and microservices for: {prompt}'
+  expected_output: Complete, functional backend implementation with proper error handling,
+    documentation, and adherence to microservices best practices. Code should be production-ready
+    with appropriate logging and monitoring.
+  agent: backend_engineer
+qa_testing_task:
+  description: 'Create comprehensive test suite and validate implementation for: {prompt}'
+  expected_output: Complete test coverage including unit tests, integration tests,
+    and API endpoint validation. Test results report with coverage metrics and performance
+    benchmarks. All tests passing with clear documentation.
+  agent: qa_engineer

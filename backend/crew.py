@@ -10,7 +10,7 @@ from crewai import Agent, Crew, Process, Task, LLM
 # Load .env from panopticon dir (has ANTHROPIC_API_KEY)
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "panopticon", ".env"))
 
-from events import (
+from .events import (
     event_bus,
     gate_store,
     AgentIntentEvent,
@@ -20,7 +20,7 @@ from events import (
     RunFinishedEvent,
     ErrorEvent,
 )
-from tools import instantiate_tools
+from .tools import instantiate_tools
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -91,7 +91,7 @@ def _summarize_task_output(text: str) -> str:
     return summary
 
 
-def _make_intent_step_callback(run_id: str, agent_name: str, zone: str, role: str):
+def _make_intent_step_callback(run_id: str, agent_name: str, role: str):
     """Emit a single AGENT_INTENT the first time the agent takes a step,
     then go silent.  This way the intent fires when the agent *actually*
     starts working rather than all-at-once upfront."""
@@ -104,7 +104,7 @@ def _make_intent_step_callback(run_id: str, agent_name: str, zone: str, role: st
                 run_id,
                 AgentIntentEvent(
                     agentName=agent_name,
-                    zone=zone,
+                    zone="WORKSHOP",  # Agent is actively working
                     message=f"Started working as {role.strip().lower()}.",
                 ),
             )
@@ -115,7 +115,6 @@ def _make_intent_step_callback(run_id: str, agent_name: str, zone: str, role: st
 def _make_task_callback(
     run_id: str,
     agent_name: str,
-    zone: str,
     task_index: int,
     total_tasks: int,
     tasks_list: list,
@@ -178,47 +177,87 @@ def run_crew(run_id: str, prompt: str) -> str:
     with open(os.path.join(_dir, "tasks.yaml"), "r") as f:
         tasks_config = yaml.safe_load(f)
 
+    # Load delegation rules for the Leader agent during execution
+    delegation_rules_path = os.path.join(_dir, "delegation_rules.md")
+    delegation_rules = ""
+    if os.path.exists(delegation_rules_path):
+        with open(delegation_rules_path, "r", encoding="utf-8") as f:
+            delegation_rules = f.read()
+
     event_bus.emit(run_id, RunStartedEvent(runId=run_id, prompt=prompt))
 
     try:
-        agents = {}
+        # Identify the Leader agent (role contains "Leader")
+        leader_key = None
         for key, config in agents_config.items():
-            zone = config.get("zone", "PARK")
+            if "leader" in config.get("role", "").lower():
+                leader_key = key
+                break
+
+        if not leader_key:
+            raise ValueError("No Leader agent found in agents.yaml")
+
+        # Create all agents (including Leader)
+        agents = {}
+        leader_agent = None
+        worker_agents = []
+
+        for key, config in agents_config.items():
             agent_name = key.replace("_", " ").title()
 
             agent_tools = instantiate_tools(config.get("tools", []))
 
-            agents[key] = Agent(
+            is_leader = (key == leader_key)
+
+            # For the Leader, enhance backstory with delegation rules
+            backstory = config["backstory"].strip()
+            if is_leader and delegation_rules:
+                backstory += f"\n\n## EXECUTION MODE - DELEGATION PROTOCOL\n\n{delegation_rules}"
+
+            agent = Agent(
                 role=config["role"].strip(),
                 goal=config["goal"].strip(),
-                backstory=config["backstory"].strip(),
+                backstory=backstory,
                 verbose=True,
                 llm=LLM(model="anthropic/claude-sonnet-4-20250514"),
                 tools=agent_tools,
+                allow_delegation=is_leader,  # Only Leader can delegate
                 step_callback=_make_intent_step_callback(
-                    run_id, agent_name, zone, config["role"]
+                    run_id, agent_name, config["role"]
                 ),
             )
 
-        task_items = list(tasks_config.items())
+            agents[key] = agent
+
+            if is_leader:
+                leader_agent = agent
+            else:
+                worker_agents.append(agent)
+
+        # Build tasks only for worker agents (not the Leader/manager)
+        task_items = [
+            (key, config) for key, config in tasks_config.items()
+            if config["agent"] != leader_key
+        ]
         total_tasks = len(task_items)
         tasks = []
+
         for i, (key, config) in enumerate(task_items):
             agent_key = config["agent"]
             agent_name = agent_key.replace("_", " ").title()
             agent_config = agents_config.get(agent_key, {})
-            zone = agent_config.get("zone", "PARK")
 
             desc = config["description"].strip()
             if "{prompt}" not in desc:
                 desc += "\n\nUser's request: {prompt}"
+
             is_last = (i == len(task_items) - 1)
             task = Task(
                 description=desc.format(prompt=prompt),
                 expected_output=config["expected_output"].strip(),
                 agent=agents[agent_key],
                 callback=_make_task_callback(
-                    run_id, agent_name, zone,
+                    run_id, agent_name,
                     task_index=i,
                     total_tasks=total_tasks,
                     tasks_list=tasks,
@@ -228,14 +267,13 @@ def run_crew(run_id: str, prompt: str) -> str:
             )
             tasks.append(task)
 
-        _llm = LLM(model="anthropic/claude-sonnet-4-20250514")
+        # Use the Leader agent as the manager for hierarchical delegation
         crew = Crew(
-            agents=list(agents.values()),
+            agents=worker_agents,  # Only worker agents, not the Leader
             tasks=tasks,
             process=Process.hierarchical,
-            manager_llm=_llm,
+            manager_agent=leader_agent,  # Leader orchestrates task delegation
             planning=True,
-            planning_llm=_llm,
             verbose=True,
         )
 

@@ -77,6 +77,35 @@ class SandboxedShellTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
+# Safe wrappers for external tools (always return a tool_result)
+# ---------------------------------------------------------------------------
+
+
+class SafeSerperDevTool(SerperDevTool):
+    def _run(self, *args, **kwargs):  # type: ignore[override]
+        try:
+            return super()._run(*args, **kwargs)
+        except Exception as e:
+            return f"Tool error (web_search): {e}"
+
+
+class SafeScrapeWebsiteTool(ScrapeWebsiteTool):
+    def _run(self, *args, **kwargs):  # type: ignore[override]
+        try:
+            return super()._run(*args, **kwargs)
+        except Exception as e:
+            return f"Tool error (web_scraper): {e}"
+
+
+class SafeFileWriterTool(FileWriterTool):
+    def _run(self, *args, **kwargs):  # type: ignore[override]
+        try:
+            return super()._run(*args, **kwargs)
+        except Exception as e:
+            return f"Tool error (file_writer): {e}"
+
+
+# ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
 
@@ -86,14 +115,14 @@ TOOL_REGISTRY: dict[str, dict] = {
         "label": "Web Search",
         "description": "Search the web using Serper API for real-time information",
         "env_key": "SERPER_API_KEY",
-        "factory": lambda: SerperDevTool(),
+        "factory": lambda: SafeSerperDevTool(),
     },
     "web_scraper": {
         "id": "web_scraper",
         "label": "Web Scraper",
         "description": "Read and extract content from any URL",
         "env_key": None,
-        "factory": lambda: ScrapeWebsiteTool(),
+        "factory": lambda: SafeScrapeWebsiteTool(),
     },
     "terminal": {
         "id": "terminal",
@@ -107,7 +136,7 @@ TOOL_REGISTRY: dict[str, dict] = {
         "label": "File Writer",
         "description": "Write content to files on disk",
         "env_key": None,
-        "factory": lambda: FileWriterTool(),
+        "factory": lambda: SafeFileWriterTool(),
     },
 }
 

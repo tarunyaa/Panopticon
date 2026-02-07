@@ -48,58 +48,61 @@ export function Sidebar() {
         <span className="text-[8px] opacity-50 ml-auto">v1</span>
       </div>
 
-      {/* Agent roster */}
-      <div className="px-3 py-2">
-        <div className="text-[8px] text-wood uppercase tracking-widest mb-1.5">
-          Agents ({agents.length}/{maxAgents})
-        </div>
-        {loading ? (
-          <div className="text-[8px] text-wood-light italic py-1">Loading...</div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {agents.map((agent, i) => (
-              <AgentCardFilled
-                key={agent.id}
-                agent={agent}
-                index={i}
-                selected={selectedId === agent.id}
-                onClick={() => handleAgentClick(agent.id)}
-              />
-            ))}
-            {canAdd && (
-              <button
-                onClick={() => setAdding(true)}
-                className="pixel-chip flex items-center justify-center gap-1 px-2 py-1.5 w-full cursor-pointer border-dashed !border-wood-light/60 hover:!border-wood"
-              >
-                <span className="text-[10px] text-wood">+</span>
-                <span className="text-[8px] text-wood-light uppercase tracking-widest">Add Agent</span>
-              </button>
-            )}
+      {/* Scrollable content area */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Agent roster */}
+        <div className="px-3 py-2">
+          <div className="text-[8px] text-wood uppercase tracking-widest mb-1.5">
+            Agents ({agents.length}/{maxAgents})
           </div>
+          {loading ? (
+            <div className="text-[8px] text-wood-light italic py-1">Loading...</div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {agents.map((agent, i) => (
+                <AgentCardFilled
+                  key={agent.id}
+                  agent={agent}
+                  index={i}
+                  selected={selectedId === agent.id}
+                  onClick={() => handleAgentClick(agent.id)}
+                />
+              ))}
+              {canAdd && (
+                <button
+                  onClick={() => setAdding(true)}
+                  className="pixel-chip flex items-center justify-center gap-1 px-2 py-1.5 w-full cursor-pointer border-dashed !border-wood-light/60 hover:!border-wood"
+                >
+                  <span className="text-[10px] text-wood">+</span>
+                  <span className="text-[8px] text-wood-light uppercase tracking-widest">Add Agent</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Detail panel for selected agent */}
+        {selectedAgent && (
+          <>
+            <div className="pixel-sep mx-3" />
+            <AgentDetailPanel
+              agent={selectedAgent}
+              index={selectedIndex}
+              onClose={() => setSelectedId(null)}
+            />
+          </>
         )}
+
+        <div className="pixel-sep mx-3" />
+
+        {/* Task input */}
+        <TaskInput />
+
+        <div className="pixel-sep mx-3" />
+
+        {/* Activity log — fills remaining space */}
+        <EventFeed agents={agents} />
       </div>
-
-      {/* Detail panel for selected agent */}
-      {selectedAgent && (
-        <>
-          <div className="pixel-sep mx-3" />
-          <AgentDetailPanel
-            agent={selectedAgent}
-            index={selectedIndex}
-            onClose={() => setSelectedId(null)}
-          />
-        </>
-      )}
-
-      <div className="pixel-sep mx-3" />
-
-      {/* Task input */}
-      <TaskInput />
-
-      <div className="pixel-sep mx-3" />
-
-      {/* Activity log — fills remaining space */}
-      <EventFeed agents={agents} />
 
       {/* Add agent modal */}
       {adding && (

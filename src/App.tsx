@@ -3,7 +3,7 @@ import { createGame, getGame } from "./phaser/game";
 import { Sidebar } from "./components/Sidebar";
 import { LoginScreen } from "./components/onboarding/LoginScreen";
 import { AvatarSelectScreen } from "./components/onboarding/AvatarSelectScreen";
-import { TeamSetupScreen } from "./components/onboarding/TeamSetupScreen";
+import { TeamPlanScreen } from "./components/onboarding/TeamPlanScreen";
 import type { OnboardingAgent } from "./types/onboarding";
 import type { CreateAgentPayload } from "./types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "./types/agents";
@@ -142,7 +142,7 @@ export default function App() {
       )}
 
       {step === "team" && leaderAvatar && (
-        <TeamSetupScreen
+        <TeamPlanScreen
           leaderAvatar={leaderAvatar}
           crewName={crewName}
           task={task}

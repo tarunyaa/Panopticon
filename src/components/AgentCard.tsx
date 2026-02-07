@@ -90,7 +90,7 @@ function DetailField({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <span className="text-[7px] text-wood-dark uppercase tracking-widest">{label}</span>
-      <div className="pixel-inset px-2 py-1 text-[9px] text-ink font-pixel mt-0.5 opacity-80">
+      <div className="pixel-inset px-2 py-1.5 text-[11px] text-ink font-pixel mt-0.5 opacity-80 leading-relaxed">
         {value}
       </div>
     </div>

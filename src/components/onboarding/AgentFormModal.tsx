@@ -60,7 +60,7 @@ export function AgentFormModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-      <div className="pixel-panel p-6 w-[420px] max-h-[80vh] overflow-y-auto flex flex-col gap-3">
+      <div className="pixel-panel p-6 w-[560px] max-h-[90vh] overflow-y-auto flex flex-col gap-3">
         <h3 className="font-pixel text-[10px] text-ink tracking-widest uppercase text-center">
           {initial ? "Edit Agent" : "Add Agent"}
         </h3>
@@ -78,16 +78,16 @@ export function AgentFormModal({
           value={role}
           onChange={(e) => setRole(e.target.value)}
           placeholder="e.g. Backend Engineer"
-          className="pixel-inset px-3 py-2 font-pixel text-[10px] text-ink w-full outline-none"
+          className="pixel-inset px-3 py-2.5 text-sm text-ink w-full outline-none"
         />
 
         <label className="font-pixel text-[8px] text-wood uppercase">Goal</label>
-        <input
-          type="text"
+        <textarea
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           placeholder="What this agent aims to achieve..."
-          className="pixel-inset px-3 py-2 font-pixel text-[10px] text-ink w-full outline-none"
+          rows={3}
+          className="pixel-inset px-3 py-2.5 text-sm text-ink w-full outline-none resize-y leading-relaxed"
         />
 
         <label className="font-pixel text-[8px] text-wood uppercase">Backstory</label>
@@ -95,8 +95,8 @@ export function AgentFormModal({
           value={backstory}
           onChange={(e) => setBackstory(e.target.value)}
           placeholder="Agent's background..."
-          rows={2}
-          className="pixel-inset px-3 py-2 font-pixel text-[10px] text-ink w-full outline-none resize-none"
+          rows={4}
+          className="pixel-inset px-3 py-2.5 text-sm text-ink w-full outline-none resize-y leading-relaxed"
         />
 
         <label className="font-pixel text-[8px] text-wood uppercase">Task Description</label>
@@ -104,8 +104,8 @@ export function AgentFormModal({
           value={taskDesc}
           onChange={(e) => setTaskDesc(e.target.value)}
           placeholder="What the agent should do..."
-          rows={2}
-          className="pixel-inset px-3 py-2 font-pixel text-[10px] text-ink w-full outline-none resize-none"
+          rows={4}
+          className="pixel-inset px-3 py-2.5 text-sm text-ink w-full outline-none resize-y leading-relaxed"
         />
 
         <label className="font-pixel text-[8px] text-wood uppercase">Expected Output</label>
@@ -113,8 +113,8 @@ export function AgentFormModal({
           value={expectedOutput}
           onChange={(e) => setExpectedOutput(e.target.value)}
           placeholder="Deliverable or output format..."
-          rows={2}
-          className="pixel-inset px-3 py-2 font-pixel text-[10px] text-ink w-full outline-none resize-none"
+          rows={3}
+          className="pixel-inset px-3 py-2.5 text-sm text-ink w-full outline-none resize-y leading-relaxed"
         />
 
         {availableTools.length > 0 && (

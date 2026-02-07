@@ -23,10 +23,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from events import event_bus, gate_store, GateResponse
-from crew import run_crew
-from zone_infer import infer_zone
-from tools import get_available_tools, TOOL_REGISTRY
+from .events import event_bus, gate_store, GateResponse
+from .crew import run_crew
+from .tools import get_available_tools, TOOL_REGISTRY
+from .planner import plan_team
 
 executor = ThreadPoolExecutor(max_workers=4)
 
@@ -36,8 +36,6 @@ AGENTS_YAML = os.path.join(_dir, "agents.yaml")
 TASKS_YAML = os.path.join(_dir, "tasks.yaml")
 
 MAX_AGENTS = 6
-
-ZONES = ["HOUSE", "WORKSHOP", "CAFE", "PARK", "HOUSE", "WORKSHOP"]
 
 
 @asynccontextmanager
@@ -89,9 +87,33 @@ class SetupAgentsRequest(BaseModel):
     agents: List[SetupAgentItem]
 
 
+class PlanTeamMessage(BaseModel):
+    role: str  # "leader" | "user"
+    content: str
+
+
+class PlanTeamRequest(BaseModel):
+    team_description: str
+    history: List[PlanTeamMessage] = []
+
+
 class GateResponseRequest(BaseModel):
     action: str  # "approve" | "reject"
     note: str = ""
+
+
+@app.post("/plan-team")
+def plan_team_endpoint(req: PlanTeamRequest):
+    """Let the leader LLM interview the user and generate a team based on team description.
+
+    The team_description should describe the TYPE of team needed (e.g., "software development team",
+    "content creation team") rather than a specific task. The team will be reusable for multiple tasks.
+
+    Synchronous def (not async) so FastAPI runs it in a thread pool,
+    avoiding blocking the event loop during the Anthropic API call.
+    """
+    history = [{"role": m.role, "content": m.content} for m in req.history]
+    return plan_team(req.team_description, history)
 
 
 @app.post("/run", response_model=RunResponse)
@@ -132,7 +154,7 @@ async def get_agents():
             "role": config.get("role", "").strip(),
             "goal": config.get("goal", "").strip(),
             "backstory": config.get("backstory", "").strip(),
-            "zone": config.get("zone", "PARK"),
+            "zone": "PARK",  # All agents start idle in PARK
             "task_description": task_info.get("description", "").strip() if task_info else "",
             "expected_output": task_info.get("expected_output", "").strip() if task_info else "",
             "tools": config.get("tools", []),
@@ -169,15 +191,11 @@ async def create_agent(req: CreateAgentRequest):
         if invalid_tools:
             raise HTTPException(status_code=400, detail=f"Unknown tool IDs: {invalid_tools}")
 
-        # Auto-assign zone round-robin
-        zone = ZONES[len(agents_config) % len(ZONES)]
-
         # Append to agents.yaml
         agents_config[req.agent_id] = {
             "role": req.role,
             "goal": req.goal,
             "backstory": req.backstory,
-            "zone": zone,
             "tools": req.tools,
         }
 
@@ -199,7 +217,7 @@ async def create_agent(req: CreateAgentRequest):
         "role": req.role,
         "goal": req.goal,
         "backstory": req.backstory,
-        "zone": zone,
+        "zone": "PARK",  # All agents start idle in PARK
     }
 
 
@@ -232,19 +250,15 @@ async def setup_agents(req: SetupAgentsRequest):
                 detail=f"Agent '{agent.agent_id}' has unknown tool IDs: {invalid_tools}",
             )
 
-    # Build YAML dicts and assign zones round-robin
     agents_config: dict = {}
     tasks_config: dict = {}
     response_agents = []
 
-    for i, agent in enumerate(req.agents):
-        zone = ZONES[i % len(ZONES)]
-
+    for agent in req.agents:
         agents_config[agent.agent_id] = {
             "role": agent.role,
             "goal": agent.goal,
             "backstory": agent.backstory,
-            "zone": zone,
             "tools": agent.tools,
         }
 
@@ -259,7 +273,7 @@ async def setup_agents(req: SetupAgentsRequest):
             "role": agent.role,
             "goal": agent.goal,
             "backstory": agent.backstory,
-            "zone": zone,
+            "zone": "PARK",  # All agents start idle in PARK
         })
 
     # Write atomically — "w" mode replaces the entire file
