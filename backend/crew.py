@@ -156,8 +156,9 @@ def run_crew(run_id: str, prompt: str) -> str:
                 ),
             )
 
+        task_items = list(tasks_config.items())
         tasks = []
-        for key, config in tasks_config.items():
+        for i, (key, config) in enumerate(task_items):
             agent_key = config["agent"]
             agent_name = agent_key.replace("_", " ").title()
             agent_config = agents_config.get(agent_key, {})
@@ -166,11 +167,14 @@ def run_crew(run_id: str, prompt: str) -> str:
             desc = config["description"].strip()
             if "{prompt}" not in desc:
                 desc += "\n\nUser's request: {prompt}"
+            is_last = (i == len(task_items) - 1)
             task = Task(
                 description=desc.format(prompt=prompt),
                 expected_output=config["expected_output"].strip(),
                 agent=agents[agent_key],
                 callback=_make_task_callback(run_id, agent_name, zone),
+                async_execution=not is_last,
+                **({"context": list(tasks)} if is_last else {}),
             )
             tasks.append(task)
 

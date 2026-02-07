@@ -4,7 +4,7 @@ import type { AgentDef } from "../registry/AgentRegistry";
 import { updateMovement } from "../systems/movement";
 import { wsClient } from "../../ws/client";
 import { API_BASE } from "../../config";
-import type { AgentIntentEvent, WSEvent, ZoneId } from "../../types/events";
+import type { AgentIntentEvent, WSEvent } from "../../types/events";
 import type { AgentInfo } from "../../types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "../../types/agents";
 
@@ -154,7 +154,7 @@ export class VillageScene extends Phaser.Scene {
 
     // Listen for agent intent events → move sprite to task zone + set progress
     const intentHandler = (ev: AgentIntentEvent) => {
-      this.agentRegistry.setTarget(ev.agentName, ev.zone as ZoneId);
+      this.agentRegistry.setTarget(ev.agentName, "WORKSHOP");
       this.agentRegistry.setProgress(ev.agentName, 0.15);
     };
     wsClient.on("intent", intentHandler);
@@ -162,9 +162,10 @@ export class VillageScene extends Phaser.Scene {
     // Listen for all events → handle run lifecycle + task progress
     const eventHandler = (ev: WSEvent) => {
       if (ev.type === "RUN_STARTED") {
-        // Gather all agents at PARK before dispatching to zones
-        this.agentRegistry.moveAllToZone("PARK");
+        // Gather all agents at CAFE to discuss the incoming task
+        this.agentRegistry.moveAllToZone("CAFE");
       } else if (ev.type === "TASK_SUMMARY") {
+        this.agentRegistry.setTarget(ev.agentName, "HOUSE");
         this.agentRegistry.setProgress(ev.agentName, 1);
       } else if (ev.type === "RUN_FINISHED") {
         // All done — agents return to PARK

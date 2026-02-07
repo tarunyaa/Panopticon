@@ -1,7 +1,7 @@
-isabella_task:
+ayesha_task:
   description: Coordinate team members and ensure objectives are met.
   expected_output: Successful team coordination and project completion.
-  agent: isabella
+  agent: ayesha
 abigail_task:
   description: 'Research the target audience and develop a content strategy with themes,
     topics, tone guidelines, and a publishing plan for the following request: {prompt}'
@@ -15,9 +15,9 @@ carlos_task:
   expected_output: Complete, publication-quality written content with clear structure,
     compelling narrative, and appropriate formatting.
   agent: carlos
-klaus_task:
+isabella_task:
   description: 'Review and refine the following content for clarity, grammar, factual
     accuracy, style consistency, and overall quality: {prompt}'
   expected_output: Polished, publication-ready content with all corrections applied,
     plus editorial notes explaining key changes and suggestions.
-  agent: klaus
+  agent: isabella

@@ -112,35 +112,23 @@ export class AgentRegistry {
     };
   }
 
-  /** Spawn multiple agents from API data — all start at PARK, then walk to their zones */
+  /** Spawn multiple agents at PARK, spaced 10 tiles apart */
   spawn(defs: AgentDef[]): void {
     const park = ZONE_MAP["PARK"];
 
     defs.forEach((def, i) => {
-      // All agents start at PARK, spaced 10 tiles apart
-      const startOffset = (i - (defs.length - 1) / 2) * 320;
-      const entry = this.createAgentAt(def, park.x + startOffset, park.y);
-
-      // Set target to their designated work zone so they walk there
-      const zoneId = (def.zone || "PARK") as ZoneId;
-      const zone = ZONE_MAP[zoneId] || ZONE_MAP["PARK"];
-      entry.targetX = zone.x + startOffset;
-      entry.targetY = zone.y;
-
+      const offset = (i - (defs.length - 1) / 2) * 320;
+      const entry = this.createAgentAt(def, park.x + offset, park.y);
       this.agents.push(entry);
     });
   }
 
-  /** Spawn a single agent at runtime — starts at PARK, walks to assigned zone */
+  /** Spawn a single agent at runtime at PARK, offset from existing agents */
   spawnOne(def: AgentDef): void {
     const park = ZONE_MAP["PARK"];
-    const entry = this.createAgentAt(def, park.x, park.y);
-
-    const zoneId = (def.zone || "PARK") as ZoneId;
-    const zone = ZONE_MAP[zoneId] || ZONE_MAP["PARK"];
-    entry.targetX = zone.x;
-    entry.targetY = zone.y;
-
+    const total = this.agents.length + 1;
+    const offset = (this.agents.length - (total - 1) / 2) * 320;
+    const entry = this.createAgentAt(def, park.x + offset, park.y);
     this.agents.push(entry);
   }
 
@@ -150,17 +138,19 @@ export class AgentRegistry {
     const z = ZONE_MAP[zone];
     if (!z) return;
 
-    agent.targetX = z.x;
+    const i = this.agents.indexOf(agent);
+    const offset = (i - (this.agents.length - 1) / 2) * 64;
+    agent.targetX = z.x + offset;
     agent.targetY = z.y;
   }
 
-  /** Move all agents to a zone (e.g. PARK) with slight spread so they don't stack */
+  /** Move all agents to a zone, spaced 2 tiles apart so they don't overlap */
   moveAllToZone(zone: ZoneId): void {
     const z = ZONE_MAP[zone];
     if (!z) return;
 
     this.agents.forEach((agent, i) => {
-      const offset = (i - (this.agents.length - 1) / 2) * 60;
+      const offset = (i - (this.agents.length - 1) / 2) * 64;
       agent.targetX = z.x + offset;
       agent.targetY = z.y;
     });
