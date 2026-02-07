@@ -17,6 +17,7 @@ interface ChatMessage {
 }
 
 interface TeamPlanScreenProps {
+  userAvatar: { spriteKey: string; name: string } | null;
   leaderAvatar: { spriteKey: string; name: string };
   crewName: string;
   task: string;
@@ -30,6 +31,7 @@ interface TeamPlanScreenProps {
 }
 
 export function TeamPlanScreen({
+  userAvatar,
   leaderAvatar,
   crewName,
   task,
@@ -52,6 +54,9 @@ export function TeamPlanScreen({
   // Review phase - agent editing
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAgentForm, setShowAgentForm] = useState(false);
+
+  // Get user avatar name from spriteKey
+  const userAvatarName = AVATARS.find((a) => a.key === userAvatar?.spriteKey)?.label ?? "You";
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -82,7 +87,7 @@ export function TeamPlanScreen({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          task,
+          team_description: task,
           history: history.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
@@ -245,15 +250,15 @@ export function TeamPlanScreen({
               />
             </div>
 
-            {/* Task */}
+            {/* Team Description */}
             <div>
               <label className="font-pixel text-[8px] text-wood uppercase tracking-widest">
-                What should your team accomplish?
+                What type of team do you need?
               </label>
               <textarea
                 value={task}
                 onChange={(e) => onTask(e.target.value)}
-                placeholder="Describe your project or goal in detail..."
+                placeholder="e.g., 'A software development team' or 'A content creation team'..."
                 rows={4}
                 className="pixel-inset px-3 py-2 font-pixel text-[10px] text-ink w-full outline-none resize-none mt-1"
               />
@@ -291,7 +296,7 @@ export function TeamPlanScreen({
           </h2>
 
           {/* Chat messages */}
-          <div className="flex-1 overflow-y-auto flex flex-col gap-3 min-h-[200px] max-h-[50vh] px-1">
+          <div className="flex-1 overflow-y-auto flex flex-col gap-4 min-h-[200px] max-h-[50vh] px-1">
             {messages.map((msg, i) =>
               msg.role === "leader" ? (
                 <LeaderBubble
@@ -301,7 +306,12 @@ export function TeamPlanScreen({
                   name={leaderAvatar.name}
                 />
               ) : (
-                <UserBubble key={i} message={msg.content} />
+                <UserBubble
+                  key={i}
+                  message={msg.content}
+                  spriteKey={userAvatar?.spriteKey ?? ""}
+                  name={userAvatarName}
+                />
               ),
             )}
             {thinking && <TypingIndicator name={leaderAvatar.name} />}
@@ -426,21 +436,21 @@ function LeaderBubble({
   name: string;
 }) {
   return (
-    <div className="flex items-start gap-2 max-w-[85%]">
-      <div className="flex-shrink-0">
+    <div className="flex items-start gap-3 max-w-[85%]">
+      <div className="flex-shrink-0 flex flex-col items-center gap-1">
         <div
-          className="w-8 h-8 pixelated"
+          className="w-16 h-16 pixelated"
           style={{
             backgroundImage: `url(assets/sprites/characters/${spriteKey}.png)`,
-            backgroundSize: "120px 160px",
-            backgroundPosition: "-40px 0px",
+            backgroundSize: "240px 320px",
+            backgroundPosition: "-80px 0px",
           }}
         />
-        <span className="font-pixel text-[6px] text-wood block text-center mt-0.5">
+        <span className="font-pixel text-[7px] text-wood block text-center">
           {name}
         </span>
       </div>
-      <div className="pixel-panel px-3 py-2">
+      <div className="pixel-panel px-3 py-2 flex-1">
         <p className="font-pixel text-[9px] text-ink leading-relaxed whitespace-pre-wrap">
           {message}
         </p>
@@ -449,13 +459,34 @@ function LeaderBubble({
   );
 }
 
-function UserBubble({ message }: { message: string }) {
+function UserBubble({
+  message,
+  spriteKey,
+  name
+}: {
+  message: string;
+  spriteKey: string;
+  name: string;
+}) {
   return (
-    <div className="flex justify-end">
-      <div className="pixel-inset px-3 py-2 max-w-[80%]">
+    <div className="flex items-start gap-3 justify-end">
+      <div className="pixel-inset px-3 py-2 max-w-[70%]">
         <p className="font-pixel text-[9px] text-ink leading-relaxed whitespace-pre-wrap">
           {message}
         </p>
+      </div>
+      <div className="flex-shrink-0 flex flex-col items-center gap-1">
+        <div
+          className="w-16 h-16 pixelated"
+          style={{
+            backgroundImage: `url(assets/sprites/characters/${spriteKey}.png)`,
+            backgroundSize: "240px 320px",
+            backgroundPosition: "-80px 0px",
+          }}
+        />
+        <span className="font-pixel text-[7px] text-wood block text-center">
+          {name}
+        </span>
       </div>
     </div>
   );

@@ -1,0 +1,15 @@
+<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" style="image-rendering: pixelated;">
+  <rect width="16" height="16" fill="none"/>
+  <!-- Magnifying glass handle -->
+  <rect x="10" y="10" width="2" height="2" fill="#5a3e2b"/>
+  <rect x="11" y="11" width="2" height="2" fill="#5a3e2b"/>
+  <rect x="12" y="12" width="2" height="2" fill="#5a3e2b"/>
+  <rect x="13" y="13" width="2" height="2" fill="#5a3e2b"/>
+  <!-- Magnifying glass lens -->
+  <rect x="4" y="2" width="6" height="2" fill="#5a3e2b"/>
+  <rect x="2" y="4" width="2" height="4" fill="#5a3e2b"/>
+  <rect x="10" y="4" width="2" height="4" fill="#5a3e2b"/>
+  <rect x="4" y="8" width="6" height="2" fill="#5a3e2b"/>
+  <!-- Glass interior -->
+  <rect x="4" y="4" width="6" height="4" fill="#87ceeb" opacity="0.5"/>
+</svg>

@@ -143,6 +143,7 @@ export default function App() {
 
       {step === "team" && leaderAvatar && (
         <TeamPlanScreen
+          userAvatar={userAvatar}
           leaderAvatar={leaderAvatar}
           crewName={crewName}
           task={task}

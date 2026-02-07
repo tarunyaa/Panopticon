@@ -1,12 +1,35 @@
-backend_implementation_task:
-  description: 'Implement backend APIs and microservices for: {prompt}'
-  expected_output: Complete, functional backend implementation with proper error handling,
-    documentation, and adherence to microservices best practices. Code should be production-ready
-    with appropriate logging and monitoring.
-  agent: backend_engineer
-qa_testing_task:
-  description: 'Create comprehensive test suite and validate implementation for: {prompt}'
-  expected_output: Complete test coverage including unit tests, integration tests,
-    and API endpoint validation. Test results report with coverage metrics and performance
-    benchmarks. All tests passing with clear documentation.
-  agent: qa_engineer
+eddy_task:
+  description: Coordinate team members and ensure objectives are met.
+  expected_output: Successful team coordination and project completion.
+  agent: eddy
+abigail_task:
+  description: 'Research and gather information for: {prompt}. Find credible sources,
+    recent developments, key concepts, and real-world examples that will help students
+    understand the topic. Identify analogies and explanations that make technical
+    concepts accessible.'
+  expected_output: 'A structured research document containing: (1) 5-8 key facts or
+    concepts with source citations, (2) 2-3 real-world examples or case studies, (3)
+    simplified explanations of technical terms, (4) relevant statistics or recent
+    developments, and (5) suggested analogies for complex concepts.'
+  agent: abigail
+carlos_task:
+  description: 'Write an educational blog post for: {prompt}. Use the research provided
+    to create engaging, student-friendly content that explains semiconductor concepts
+    clearly. Include an attention-grabbing introduction, well-organized body sections,
+    practical examples, and a strong conclusion.'
+  expected_output: 'A complete blog post (800-1200 words) with: (1) compelling headline,
+    (2) engaging introduction that establishes relevance for students, (3) 3-5 main
+    sections with clear subheadings, (4) accessible explanations of technical concepts
+    using analogies, (5) real-world examples and applications, (6) conclusion that
+    reinforces key takeaways, and (7) properly formatted text ready for publication.'
+  agent: carlos
+isabella_task:
+  description: 'Review and edit the blog post for: {prompt}. Verify factual accuracy,
+    improve clarity and readability for student audiences, check structure and flow,
+    ensure consistent tone, and confirm all technical concepts are explained appropriately.'
+  expected_output: 'A polished final blog post with: (1) verified factual accuracy,
+    (2) clear, student-appropriate language throughout, (3) smooth transitions and
+    logical flow, (4) corrected grammar and spelling, (5) consistent formatting, (6)
+    editorial notes documenting major changes made, and (7) confirmation that content
+    meets educational standards for the target audience.'
+  agent: isabella

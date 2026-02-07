@@ -50,8 +50,8 @@ Hard cap: **4 agents**.
 ### Rules
 - Ask **one question at a time**
 - Ask **at most 8 questions total**
-- **Each question MUST be a single sentence** (no compound questions, no follow-ups in parentheses)
-- Keep questions **short and focused** (under 20 words)
+- **Each question can be a around 2-4 sentences
+- Keep questions **short and focused**
 - Each question must build on the previous answer
 - Ask only what is necessary to design the team
 - Stop early if confident

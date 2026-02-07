@@ -14,10 +14,6 @@ from dotenv import load_dotenv
 _dir = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_dir, "..", "panopticon", ".env"))
 
-# CrewAI probes for OPENAI_API_KEY even when using Anthropic — set a dummy to suppress
-if not os.environ.get("OPENAI_API_KEY"):
-    os.environ["OPENAI_API_KEY"] = "unused"
-
 import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -142,6 +138,11 @@ async def get_agents():
 
     agents = []
     for agent_id, config in agents_config.items():
+        # Skip the Leader agent (displayed separately in UI)
+        role = config.get("role", "")
+        if "leader" in role.lower():
+            continue
+
         # Find the matching task for this agent
         task_info = {}
         for task_key, task_config in tasks_config.items():

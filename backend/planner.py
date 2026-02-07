@@ -40,7 +40,7 @@ class AskQuestionTool(BaseTool):
     )
 
     def _run(self, question: str) -> str:
-        """Returns a special marker and writes a temp file to signal a question.
+        """Write question to marker file and return completion signal.
 
         The planner flow will detect this file and return the question
         to the frontend instead of continuing execution.
@@ -50,7 +50,12 @@ class AskQuestionTool(BaseTool):
         with open(marker_path, "w") as f:
             f.write(question)
 
-        return f"__QUESTION__:{question}"
+        # Return a definitive completion message (no special markers that confuse CrewAI)
+        return (
+            f"SUCCESS: Question has been sent to the user and I am now waiting for their response. "
+            f"The question was: '{question}'. "
+            f"I will receive their answer in the next turn and can continue the planning process."
+        )
 
 
 class CreateTeamFilesTool(BaseTool):
@@ -119,7 +124,11 @@ class CreateTeamFilesTool(BaseTool):
             with open(self.tasks_path, "w") as f:
                 yaml.dump(tasks_config, f, sort_keys=False, default_flow_style=False)
 
-            return f"__TEAM_CREATED__:Successfully created team with {agent_count} agents"
+            return (
+                f"SUCCESS: Team configuration has been created and saved. "
+                f"Generated {agent_count} agents with their respective tasks. "
+                f"The team is now ready to be deployed."
+            )
 
         except yaml.YAMLError as e:
             return f"Error parsing YAML: {e}"
@@ -204,7 +213,7 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
             goal="Interview the user and design an optimal 3-4 agent team for a specific domain",
             backstory=leader_backstory,
             tools=[ask_tool, create_tool],
-            llm=LLM(model="anthropic/claude-sonnet-4-20250514"),
+            llm=LLM(model="gpt-4o", api_key=os.environ.get("OPENAI_API_KEY")),
             verbose=True,
             allow_delegation=False,
         )
@@ -220,10 +229,10 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
                 "IMPORTANT: You must use ONLY ONE tool in this turn. "
                 "Either use ask_question to ask a single question, "
                 "OR use create_team_files when you're ready to generate the team. "
-                "Do NOT use multiple tools in one turn."
+                "After using the tool, your task is COMPLETE - do not take any additional actions."
             ),
             expected_output=(
-                "The result of using exactly ONE tool: either a question or the team configuration"
+                "A success message from the tool you used (either 'Question has been sent' or 'Successfully created team')"
             ),
             agent=leader,
         )
@@ -277,9 +286,14 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
             with open(tasks_path, "r") as f:
                 tasks_config = yaml.safe_load(f)
 
-            # Convert to frontend format
+            # Convert to frontend format (exclude Leader - frontend handles it)
             agents = []
             for agent_id, agent_data in agents_config.items():
+                # Skip the Leader agent (frontend already has it)
+                role = agent_data.get("role", "")
+                if "leader" in role.lower():
+                    continue
+
                 # Find the task for this agent
                 task_data = None
                 for task_key, t in tasks_config.items():

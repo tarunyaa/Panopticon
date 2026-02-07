@@ -219,7 +219,7 @@ def run_crew(run_id: str, prompt: str) -> str:
                 goal=config["goal"].strip(),
                 backstory=backstory,
                 verbose=True,
-                llm=LLM(model="anthropic/claude-sonnet-4-20250514"),
+                llm=LLM(model="gpt-4o", api_key=os.environ.get("OPENAI_API_KEY")),
                 tools=agent_tools,
                 allow_delegation=is_leader,  # Only Leader can delegate
                 step_callback=_make_intent_step_callback(
@@ -273,7 +273,7 @@ def run_crew(run_id: str, prompt: str) -> str:
             tasks=tasks,
             process=Process.hierarchical,
             manager_agent=leader_agent,  # Leader orchestrates task delegation
-            planning=True,
+            planning=False,  # Disable planning to avoid OpenAI dependency
             verbose=True,
         )
 
