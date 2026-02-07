@@ -1,7 +1,7 @@
-ayesha_task:
+adam_task:
   description: Coordinate team members and ensure objectives are met.
   expected_output: Successful team coordination and project completion.
-  agent: ayesha
+  agent: adam
 abigail_task:
   description: 'Research the target audience and develop a content strategy with themes,
     topics, tone guidelines, and a publishing plan for the following request: {prompt}'
