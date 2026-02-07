@@ -3,6 +3,7 @@ import { AgentRegistry } from "../registry/AgentRegistry";
 import type { AgentDef } from "../registry/AgentRegistry";
 import { updateMovement } from "../systems/movement";
 import { wsClient } from "../../ws/client";
+import { API_BASE } from "../../config";
 import type { AgentIntentEvent, WSEvent, ZoneId } from "../../types/events";
 import type { AgentInfo } from "../../types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "../../types/agents";
@@ -110,7 +111,7 @@ export class VillageScene extends Phaser.Scene {
 
     if (!skipSpawn) {
       // Fetch agents from API and spawn dynamically
-      fetch("http://localhost:8000/agents")
+      fetch(`${API_BASE}/agents`)
         .then((res) => res.json())
         .then((data: { agents: AgentInfo[] }) => {
           const defs = data.agents.map((agent, i) => agentInfoToDef(agent, i));

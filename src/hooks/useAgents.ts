@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AgentInfo, CreateAgentPayload } from "../types/agents";
 import { getGame } from "../phaser/game";
+import { API_BASE } from "../config";
 
-const API = "http://localhost:8000";
+const API = API_BASE;
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -62,23 +63,23 @@ export function useAgents() {
   );
 
   const batchCreateAgents = useCallback(
-    async (payloads: CreateAgentPayload[]) => {
-      for (const payload of payloads) {
-        const res = await fetch(`${API}/agents`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          let detail = `Server returned ${res.status}`;
-          try {
-            const data = await res.json();
-            if (data.detail) detail = data.detail;
-          } catch { /* response wasn't JSON */ }
-          throw new Error(detail);
-        }
+    async (payloads: CreateAgentPayload[]): Promise<{ id: string; zone: string }[]> => {
+      const res = await fetch(`${API}/agents/setup`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agents: payloads }),
+      });
+      if (!res.ok) {
+        let detail = `Server returned ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data.detail) detail = data.detail;
+        } catch { /* response wasn't JSON */ }
+        throw new Error(detail);
       }
+      const data = await res.json();
       await fetchAgents();
+      return data.agents as { id: string; zone: string }[];
     },
     [fetchAgents],
   );

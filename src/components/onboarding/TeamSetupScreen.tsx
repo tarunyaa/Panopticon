@@ -18,6 +18,7 @@ interface TeamSetupScreenProps {
   onAgents: (agents: OnboardingAgent[]) => void;
   onEnterVillage: () => void;
   entering: boolean;
+  error?: string | null;
 }
 
 export function TeamSetupScreen({
@@ -30,6 +31,7 @@ export function TeamSetupScreen({
   onAgents,
   onEnterVillage,
   entering,
+  error,
 }: TeamSetupScreenProps) {
   const [editingSlot, setEditingSlot] = useState<number | null>(null);
 
@@ -176,13 +178,29 @@ export function TeamSetupScreen({
           </div>
 
           {/* Enter Village button */}
-          <button
-            className="pixel-btn font-pixel text-[12px] px-8 py-3 text-ink tracking-wider uppercase mt-2 self-center"
-            disabled={!canEnter || entering}
-            onClick={onEnterVillage}
-          >
-            {entering ? "Entering..." : "Enter Village"}
-          </button>
+          <div className="flex flex-col items-center gap-1 mt-2">
+            <button
+              className="pixel-btn font-pixel text-[12px] px-8 py-3 text-ink tracking-wider uppercase"
+              disabled={!canEnter || entering}
+              onClick={onEnterVillage}
+            >
+              {entering ? "Entering..." : "Enter Village"}
+            </button>
+            {!canEnter && (
+              <span className="font-pixel text-[8px] text-red-400">
+                {crewName.trim() === ""
+                  ? "Enter a crew name"
+                  : task.trim() === ""
+                    ? "Enter a task"
+                    : "Add at least one agent"}
+              </span>
+            )}
+            {error && (
+              <span className="font-pixel text-[8px] text-red-400">
+                {error}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

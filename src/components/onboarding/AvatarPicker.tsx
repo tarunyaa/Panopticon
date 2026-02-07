@@ -14,31 +14,35 @@ export function AvatarPicker({ selected, onSelect, excludeKey, excludeKeys }: Av
   if (excludeKey) excluded.add(excludeKey);
   if (excludeKeys) excludeKeys.forEach((k) => excluded.add(k));
 
-  const avatars = AVATARS.filter((a) => !excluded.has(a.key));
-
   return (
     <div className="grid grid-cols-4 gap-2">
-      {avatars.map((avatar) => {
+      {AVATARS.map((avatar) => {
         const isSelected = selected === avatar.key;
+        const isExcluded = excluded.has(avatar.key);
         return (
           <button
             key={avatar.key}
-            onClick={() => onSelect(avatar.key)}
-            className={`flex flex-col items-center gap-1 p-2 cursor-pointer border-2 ${
-              isSelected
-                ? "pixel-btn-pressed border-accent-blue bg-parchment"
-                : "pixel-btn border-wood-dark"
+            onClick={() => !isExcluded && onSelect(avatar.key)}
+            disabled={isExcluded}
+            className={`flex flex-col items-center gap-1 p-2 border-2 ${
+              isExcluded
+                ? "opacity-30 cursor-not-allowed border-wood-dark"
+                : isSelected
+                  ? "pixel-btn-pressed border-accent-blue bg-parchment cursor-pointer"
+                  : "pixel-btn border-wood-dark cursor-pointer"
             }`}
           >
             <div
-              className="w-12 h-12 pixelated"
+              className={`w-12 h-12 pixelated${isExcluded ? " grayscale" : ""}`}
               style={{
                 backgroundImage: `url(assets/sprites/characters/${avatar.key}.png)`,
                 backgroundSize: "144px 192px",
                 backgroundPosition: "-48px 0px",
               }}
             />
-            <span className="font-pixel text-[8px] text-ink">{avatar.label}</span>
+            <span className={`font-pixel text-[8px] ${isExcluded ? "text-gray-400" : "text-ink"}`}>
+              {avatar.label}
+            </span>
           </button>
         );
       })}

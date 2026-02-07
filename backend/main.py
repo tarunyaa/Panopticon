@@ -7,6 +7,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from typing import List
 from dotenv import load_dotenv
 
 # Load env BEFORE any CrewAI imports (they probe for API keys at import time)
@@ -70,6 +71,19 @@ class CreateAgentRequest(BaseModel):
     backstory: str
     task_description: str
     expected_output: str
+
+
+class SetupAgentItem(BaseModel):
+    agent_id: str
+    role: str
+    goal: str
+    backstory: str
+    task_description: str
+    expected_output: str
+
+
+class SetupAgentsRequest(BaseModel):
+    agents: List[SetupAgentItem]
 
 
 @app.post("/run", response_model=RunResponse)
@@ -167,6 +181,66 @@ async def create_agent(req: CreateAgentRequest):
         "backstory": req.backstory,
         "zone": zone,
     }
+
+
+@app.put("/agents/setup")
+async def setup_agents(req: SetupAgentsRequest):
+    """Replace all agents and tasks atomically (used during onboarding)."""
+    if not req.agents:
+        raise HTTPException(status_code=400, detail="At least one agent is required")
+
+    if len(req.agents) > MAX_AGENTS:
+        raise HTTPException(status_code=400, detail=f"Maximum of {MAX_AGENTS} agents allowed")
+
+    # Validate all agent IDs upfront
+    seen_ids: set[str] = set()
+    for agent in req.agents:
+        if not re.match(r"^[a-z][a-z0-9_]*$", agent.agent_id):
+            raise HTTPException(
+                status_code=400,
+                detail=f"agent_id '{agent.agent_id}' must start with a lowercase letter and contain only lowercase letters, digits, and underscores",
+            )
+        if agent.agent_id in seen_ids:
+            raise HTTPException(status_code=400, detail=f"Duplicate agent_id: '{agent.agent_id}'")
+        seen_ids.add(agent.agent_id)
+
+    # Build YAML dicts and assign zones round-robin
+    agents_config: dict = {}
+    tasks_config: dict = {}
+    response_agents = []
+
+    for i, agent in enumerate(req.agents):
+        zone = ZONES[i % len(ZONES)]
+
+        agents_config[agent.agent_id] = {
+            "role": agent.role,
+            "goal": agent.goal,
+            "backstory": agent.backstory,
+            "zone": zone,
+        }
+
+        tasks_config[f"{agent.agent_id}_task"] = {
+            "description": agent.task_description,
+            "expected_output": agent.expected_output,
+            "agent": agent.agent_id,
+        }
+
+        response_agents.append({
+            "id": agent.agent_id,
+            "role": agent.role,
+            "goal": agent.goal,
+            "backstory": agent.backstory,
+            "zone": zone,
+        })
+
+    # Write atomically — "w" mode replaces the entire file
+    with _yaml_lock:
+        with open(AGENTS_YAML, "w") as f:
+            yaml.dump(agents_config, f, sort_keys=False, default_flow_style=False)
+        with open(TASKS_YAML, "w") as f:
+            yaml.dump(tasks_config, f, sort_keys=False, default_flow_style=False)
+
+    return {"agents": response_agents}
 
 
 @app.websocket("/runs/{run_id}")

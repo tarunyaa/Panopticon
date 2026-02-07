@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import concurrent.futures
 import yaml
 from dotenv import load_dotenv
 from crewai import Agent, Crew, Process, Task, LLM
@@ -162,18 +163,25 @@ def run_crew(run_id: str, prompt: str) -> str:
             agent_config = agents_config.get(agent_key, {})
             zone = agent_config.get("zone", "PARK")
 
+            desc = config["description"].strip()
+            if "{prompt}" not in desc:
+                desc += "\n\nUser's request: {prompt}"
             task = Task(
-                description=config["description"].strip().format(prompt=prompt),
+                description=desc.format(prompt=prompt),
                 expected_output=config["expected_output"].strip(),
                 agent=agents[agent_key],
                 callback=_make_task_callback(run_id, agent_name, zone),
             )
             tasks.append(task)
 
+        _llm = LLM(model="anthropic/claude-sonnet-4-20250514")
         crew = Crew(
             agents=list(agents.values()),
             tasks=tasks,
-            process=Process.sequential,
+            process=Process.hierarchical,
+            manager_llm=_llm,
+            planning=True,
+            planning_llm=_llm,
             verbose=True,
         )
 

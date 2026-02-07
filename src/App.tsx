@@ -7,6 +7,7 @@ import { TeamSetupScreen } from "./components/onboarding/TeamSetupScreen";
 import type { OnboardingAgent } from "./types/onboarding";
 import type { CreateAgentPayload } from "./types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "./types/agents";
+import { API_BASE } from "./config";
 
 type Step = "login" | "avatars" | "team" | "main";
 
@@ -22,6 +23,7 @@ export default function App() {
   const [task, setTask] = useState("");
   const [agents, setAgents] = useState<OnboardingAgent[]>([]);
   const [entering, setEntering] = useState(false);
+  const [enterError, setEnterError] = useState<string | null>(null);
 
   useEffect(() => {
     if (gameRef.current && !gameInstance.current) {
@@ -38,6 +40,7 @@ export default function App() {
   const handleEnterVillage = useCallback(async () => {
     if (!leaderAvatar) return;
     setEntering(true);
+    setEnterError(null);
 
     try {
       // Build all agent payloads: leader (slot 0) + team agents
@@ -63,24 +66,21 @@ export default function App() {
         expected_output: a.expected_output,
       }));
 
-      // POST each agent to backend sequentially, collect assigned zones
-      const API = "http://localhost:8000";
-      const assignedZones: string[] = [];
-      for (const payload of payloads) {
-        const res = await fetch(`${API}/agents`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const data = await res.json();
-          console.error("Failed to create agent:", data.detail);
-          assignedZones.push("PARK");
-        } else {
-          const data = await res.json();
-          assignedZones.push(data.zone || "PARK");
-        }
+      // Replace all agents atomically via PUT /agents/setup
+      const API = API_BASE;
+      const res = await fetch(`${API}/agents/setup`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agents: payloads }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || `Server returned ${res.status}`);
       }
+      const { agents: createdAgents } = await res.json();
+      const assignedZones: string[] = createdAgents.map(
+        (a: { zone: string }) => a.zone,
+      );
 
       // Build AgentDef[] for Phaser and emit spawn event
       const game = getGame();
@@ -104,6 +104,7 @@ export default function App() {
       setStep("main");
     } catch (err) {
       console.error("Error entering village:", err);
+      setEnterError(err instanceof Error ? err.message : "Failed to connect to server");
     } finally {
       setEntering(false);
     }
@@ -140,6 +141,7 @@ export default function App() {
           onAgents={setAgents}
           onEnterVillage={handleEnterVillage}
           entering={entering}
+          error={enterError}
         />
       )}
 

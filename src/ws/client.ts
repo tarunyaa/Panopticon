@@ -1,4 +1,5 @@
 import type { WSEvent, AgentIntentEvent } from "../types/events";
+import { WS_BASE } from "../config";
 
 type EventHandler = (ev: WSEvent) => void;
 type IntentHandler = (ev: AgentIntentEvent) => void;
@@ -10,7 +11,7 @@ class WSClient {
 
   connect(runId: string): void {
     this.disconnect();
-    this.ws = new WebSocket(`ws://localhost:8000/runs/${runId}`);
+    this.ws = new WebSocket(`${WS_BASE}/runs/${runId}`);
 
     this.ws.onmessage = (msg) => {
       try {

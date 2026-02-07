@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { wsClient } from "../ws/client";
+import { API_BASE } from "../config";
 
 export function TaskInput() {
   const [prompt, setPrompt] = useState("");
@@ -13,7 +14,7 @@ export function TaskInput() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("http://localhost:8000/run", {
+      const res = await fetch(`${API_BASE}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text }),
