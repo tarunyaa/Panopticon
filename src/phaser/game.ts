@@ -1,7 +1,12 @@
 import Phaser from "phaser";
 import { VillageScene } from "./scenes/VillageScene";
 
-export function createGame(parent: HTMLElement): Phaser.Game {
+let gameInstance: Phaser.Game | null = null;
+
+export function createGame(
+  parent: HTMLElement,
+  sceneData?: Record<string, unknown>,
+): Phaser.Game {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent,
@@ -18,5 +23,17 @@ export function createGame(parent: HTMLElement): Phaser.Game {
     },
     scene: [VillageScene],
   });
+
+  if (sceneData) {
+    for (const [key, value] of Object.entries(sceneData)) {
+      game.registry.set(key, value);
+    }
+  }
+
+  gameInstance = game;
   return game;
+}
+
+export function getGame(): Phaser.Game | null {
+  return gameInstance;
 }

@@ -97,7 +97,7 @@ function EventEntry({
           <span>
             <span className="font-bold text-ink">{event.agentName}</span>
             {" "}
-            <span className="text-wood-light">{clip(event.message)}</span>
+            <span className="text-wood-light">{event.message}</span>
           </span>
         </div>
       );
@@ -147,34 +147,45 @@ function TaskSummaryEntry({
   const [expanded, setExpanded] = useState(false);
   const dot = agentDotMap[event.agentName] || "bg-wood";
 
+  // Show first ~3 lines as a preview
+  const outputLines = event.fullOutput.trim().split("\n");
+  const preview = outputLines.slice(0, 3).join("\n");
+  const hasMore = outputLines.length > 3;
+
   return (
     <div className="bg-parchment-light/50 border border-text-dark/[0.06] rounded text-[8px]">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-start gap-1.5 px-1.5 py-1 w-full text-left cursor-pointer"
-      >
+      {/* Header: agent name + summary */}
+      <div className="flex items-start gap-1.5 px-1.5 py-1">
         <span
           className={`w-2 h-2 mt-[1px] ${dot} border border-wood-dark shrink-0 rounded-sm`}
         />
         <div className="min-w-0 flex-1">
           <span className="text-ink font-bold">{event.agentName}</span>
           <span className="text-accent-green mx-1">&#10003;</span>
-          <span className="text-wood-light text-[7px] ml-auto">
-            {expanded ? "▲" : "▼"}
-          </span>
+          <span className="text-wood-dark text-[7px]">Finished.</span>
           <p className="text-wood-dark break-words leading-snug mt-0.5">
             {event.summary}
           </p>
         </div>
-      </button>
+      </div>
 
-      {expanded && (
-        <div className="px-2 pb-1.5 pt-0.5 border-t border-text-dark/[0.06]">
-          <pre className="text-[7px] text-wood-dark whitespace-pre-wrap break-words leading-snug max-h-40 overflow-y-auto">
-            {event.fullOutput}
-          </pre>
-        </div>
-      )}
+      {/* Output preview — always visible */}
+      <div className="px-2 pb-1 border-t border-text-dark/[0.06]">
+        <span className="text-[6px] text-wood uppercase tracking-widest">
+          Output
+        </span>
+        <pre className="text-[7px] text-wood-dark whitespace-pre-wrap break-words leading-snug mt-0.5">
+          {expanded ? event.fullOutput.trim() : preview}
+        </pre>
+        {hasMore && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="text-[7px] text-accent-blue hover:underline cursor-pointer mt-0.5"
+          >
+            {expanded ? "Show less" : `Show more (${outputLines.length} lines)`}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

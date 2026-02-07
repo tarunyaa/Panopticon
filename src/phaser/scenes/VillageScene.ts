@@ -1,8 +1,22 @@
 import Phaser from "phaser";
 import { AgentRegistry } from "../registry/AgentRegistry";
+import type { AgentDef } from "../registry/AgentRegistry";
 import { updateMovement } from "../systems/movement";
 import { wsClient } from "../../ws/client";
 import type { AgentIntentEvent, WSEvent, ZoneId } from "../../types/events";
+import type { AgentInfo } from "../../types/agents";
+import { ALL_SPRITES, PHASER_COLORS } from "../../types/agents";
+
+function agentInfoToDef(agent: AgentInfo, index: number): AgentDef {
+  return {
+    id: agent.id,
+    name: agent.id.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+    role: agent.role,
+    color: PHASER_COLORS[index % PHASER_COLORS.length],
+    spriteKey: ALL_SPRITES[index % ALL_SPRITES.length].key,
+    zone: agent.zone,
+  };
+}
 
 export class VillageScene extends Phaser.Scene {
   agentRegistry!: AgentRegistry;
@@ -40,7 +54,7 @@ export class VillageScene extends Phaser.Scene {
     this.load.image("CuteRPG_Desert_B", "assets/maps/map_assets/cute_rpg_word_VXAce/tilesets/CuteRPG_Desert_B.png");
     this.load.image("CuteRPG_Forest_C", "assets/maps/map_assets/cute_rpg_word_VXAce/tilesets/CuteRPG_Forest_C.png");
 
-    // Character spritesheets (one per agent)
+    // Character spritesheets (all 6, preloaded upfront)
     AgentRegistry.preload(this);
   }
 
@@ -89,12 +103,36 @@ export class VillageScene extends Phaser.Scene {
     collisionsLayer?.setCollisionByProperty({ collide: true });
     collisionsLayer?.setDepth(-1);
 
-    // Spawn agents (also creates per-character animations)
+    // Create agent registry (sprites are spawned after API fetch)
     this.agentRegistry = new AgentRegistry(this);
-    this.agentRegistry.spawn("PARK");
 
-    // Idle bob is handled inside updateMovement() via a sine offset
-    // so it doesn't conflict with physics-driven Y positioning.
+    const skipSpawn = this.registry.get("skipAgentSpawn") === true;
+
+    if (!skipSpawn) {
+      // Fetch agents from API and spawn dynamically
+      fetch("http://localhost:8000/agents")
+        .then((res) => res.json())
+        .then((data: { agents: AgentInfo[] }) => {
+          const defs = data.agents.map((agent, i) => agentInfoToDef(agent, i));
+          this.agentRegistry.spawn(defs);
+        })
+        .catch((err) => {
+          console.warn("Failed to fetch agents, spawning none:", err);
+        });
+    }
+
+    // Listen for batch spawn from onboarding flow
+    const spawnAgentsHandler = (defs: AgentDef[]) => {
+      this.agentRegistry.spawn(defs);
+    };
+    this.game.events.on("spawn-agents", spawnAgentsHandler);
+
+    // Listen for new agents created via the sidebar
+    const agentCreatedHandler = (agent: AgentInfo, index: number) => {
+      const def = agentInfoToDef(agent, index);
+      this.agentRegistry.spawnOne(def);
+    };
+    this.game.events.on("agent-created", agentCreatedHandler);
 
     // Camera setup — center on PARK zone where agents spawn
     const camera = this.cameras.main;
@@ -113,17 +151,23 @@ export class VillageScene extends Phaser.Scene {
       camera.setZoom(Math.min(2, camera.zoom + 0.1));
     });
 
-    // Listen for agent intent events → move sprite + set progress
+    // Listen for agent intent events → move sprite to task zone + set progress
     const intentHandler = (ev: AgentIntentEvent) => {
       this.agentRegistry.setTarget(ev.agentName, ev.zone as ZoneId);
       this.agentRegistry.setProgress(ev.agentName, 0.15);
     };
     wsClient.on("intent", intentHandler);
 
-    // Listen for all events → update progress on task completion
+    // Listen for all events → handle run lifecycle + task progress
     const eventHandler = (ev: WSEvent) => {
-      if (ev.type === "TASK_SUMMARY") {
+      if (ev.type === "RUN_STARTED") {
+        // Gather all agents at PARK before dispatching to zones
+        this.agentRegistry.moveAllToZone("PARK");
+      } else if (ev.type === "TASK_SUMMARY") {
         this.agentRegistry.setProgress(ev.agentName, 1);
+      } else if (ev.type === "RUN_FINISHED") {
+        // All done — agents return to PARK
+        this.agentRegistry.moveAllToZone("PARK");
       }
     };
     wsClient.on("event", eventHandler);
@@ -137,6 +181,8 @@ export class VillageScene extends Phaser.Scene {
     this.events.on("shutdown", () => {
       wsClient.off("intent", intentHandler);
       wsClient.off("event", eventHandler);
+      this.game.events.off("agent-created", agentCreatedHandler);
+      this.game.events.off("spawn-agents", spawnAgentsHandler);
     });
   }
 

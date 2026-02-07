@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from events import event_bus
 from crew import run_crew
+from zone_infer import infer_zone
 
 executor = ThreadPoolExecutor(max_workers=4)
 

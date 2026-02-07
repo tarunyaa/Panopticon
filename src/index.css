@@ -151,6 +151,17 @@ textarea:focus-visible {
   outline-offset: 0px;
 }
 
+/* ── Onboarding overlay ── */
+.onboarding-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(58, 40, 32, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
 /* ── Spinner ── */
 @keyframes spin {
   from { transform: rotate(0deg); }
