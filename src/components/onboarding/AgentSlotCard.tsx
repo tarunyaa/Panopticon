@@ -1,5 +1,12 @@
 import type { OnboardingAgent } from "../../types/onboarding";
 
+const TOOL_SHORT_LABELS: Record<string, string> = {
+  web_search: "Search",
+  web_scraper: "Scrape",
+  terminal: "Term",
+  file_writer: "File",
+};
+
 interface AgentSlotCardProps {
   agent: OnboardingAgent | null;
   index: number;
@@ -46,6 +53,18 @@ export function AgentSlotCard({ agent, index, isLeader, onClick }: AgentSlotCard
       <span className="font-pixel text-[7px] text-wood truncate w-full text-center">
         {agent.role}
       </span>
+      {agent.tools && agent.tools.length > 0 && (
+        <div className="flex flex-wrap gap-0.5 justify-center">
+          {agent.tools.map((t) => (
+            <span
+              key={t}
+              className="font-pixel text-[6px] px-1 py-0.5 bg-parchment/50 text-wood rounded"
+            >
+              {TOOL_SHORT_LABELS[t] ?? t}
+            </span>
+          ))}
+        </div>
+      )}
     </button>
   );
 }

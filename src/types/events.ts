@@ -36,6 +36,15 @@ export interface ErrorEvent {
   message: string;
 }
 
+export interface GateRequestedEvent {
+  type: "GATE_REQUESTED";
+  gateId: string;
+  runId: string;
+  agentName: string;
+  question: string;
+  context: string;
+}
+
 export interface WorldSnapshotEvent {
   type: "WORLD_SNAPSHOT";
   agents: Array<{ name: string; zone: ZoneId }>;
@@ -48,4 +57,5 @@ export type WSEvent =
   | TaskSummaryEvent
   | RunFinishedEvent
   | ErrorEvent
+  | GateRequestedEvent
   | WorldSnapshotEvent;

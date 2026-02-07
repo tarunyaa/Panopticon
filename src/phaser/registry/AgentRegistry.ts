@@ -22,6 +22,9 @@ export interface AgentEntry {
   progress: number;
   targetX: number;
   targetY: number;
+  speechBg?: Phaser.GameObjects.Graphics;
+  speechText?: Phaser.GameObjects.Text;
+  speechTimer: number;
 }
 
 const BAR_WIDTH = 50;
@@ -109,6 +112,7 @@ export class AgentRegistry {
     return {
       def, sprite, marker, label, barBg, barFill,
       progress: 0, targetX: x, targetY: y,
+      speechTimer: 0,
     };
   }
 
@@ -169,6 +173,79 @@ export class AgentRegistry {
       if (agent.progress > 0 && agent.progress < 0.9) {
         agent.progress = Math.min(0.9, agent.progress + 0.0008);
         agent.barFill.width = BAR_WIDTH * agent.progress;
+      }
+    }
+  }
+
+  showBubble(agentName: string, text: string, frames = 180): void {
+    const agent = this.findAgent(agentName);
+    if (!agent) return;
+
+    const truncated = text.length > 50 ? text.slice(0, 47) + "..." : text;
+    const sx = agent.sprite.x;
+    const sy = agent.sprite.y - 70;
+
+    if (agent.speechText) {
+      // Update existing bubble
+      agent.speechText.setText(truncated).setPosition(sx, sy).setAlpha(1);
+      agent.speechBg?.destroy();
+    } else {
+      agent.speechText = this.scene.add
+        .text(sx, sy, truncated, {
+          fontSize: "10px",
+          color: "#ffffff",
+          wordWrap: { width: 150 },
+          align: "center",
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(14);
+    }
+
+    // Draw rounded-rect background behind text
+    const bounds = agent.speechText.getBounds();
+    const pad = 6;
+    const bg = this.scene.add.graphics().setDepth(13);
+    bg.fillStyle(0x000000, 0.75);
+    bg.fillRoundedRect(
+      bounds.x - pad,
+      bounds.y - pad,
+      bounds.width + pad * 2,
+      bounds.height + pad * 2,
+      6
+    );
+    agent.speechBg = bg;
+    agent.speechTimer = frames;
+  }
+
+  clearBubble(agentName: string): void {
+    const agent = this.findAgent(agentName);
+    if (!agent) return;
+    agent.speechText?.destroy();
+    agent.speechBg?.destroy();
+    agent.speechText = undefined;
+    agent.speechBg = undefined;
+    agent.speechTimer = 0;
+  }
+
+  tickBubbles(): void {
+    for (const agent of this.agents) {
+      if (agent.speechTimer <= 0) continue;
+      agent.speechTimer--;
+      if (agent.speechTimer === 0) {
+        // Fade out then destroy
+        if (agent.speechText) {
+          this.scene.tweens.add({
+            targets: [agent.speechText, agent.speechBg],
+            alpha: 0,
+            duration: 400,
+            onComplete: () => {
+              agent.speechText?.destroy();
+              agent.speechBg?.destroy();
+              agent.speechText = undefined;
+              agent.speechBg = undefined;
+            },
+          });
+        }
       }
     }
   }

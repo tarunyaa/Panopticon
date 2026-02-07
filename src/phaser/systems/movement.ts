@@ -50,4 +50,21 @@ function moveAgent(agent: AgentEntry): void {
   marker.setPosition(sprite.x, sprite.y + 8 + bob);
   barBg.setPosition(sprite.x, sprite.y + 36 + bob);
   barFill.setPosition(sprite.x - BAR_WIDTH / 2, sprite.y + 36 + bob);
+
+  // Track speech bubble position
+  if (agent.speechText && agent.speechBg) {
+    const bubbleY = sprite.y - 70 + bob;
+    agent.speechText.setPosition(sprite.x, bubbleY);
+    const bounds = agent.speechText.getBounds();
+    const pad = 6;
+    agent.speechBg.clear();
+    agent.speechBg.fillStyle(0x000000, 0.75);
+    agent.speechBg.fillRoundedRect(
+      bounds.x - pad,
+      bounds.y - pad,
+      bounds.width + pad * 2,
+      bounds.height + pad * 2,
+      6
+    );
+  }
 }

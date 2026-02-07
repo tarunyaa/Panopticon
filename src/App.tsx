@@ -8,6 +8,9 @@ import type { OnboardingAgent } from "./types/onboarding";
 import type { CreateAgentPayload } from "./types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "./types/agents";
 import { API_BASE } from "./config";
+import { GateModal } from "./components/GateModal";
+import { wsClient } from "./ws/client";
+import type { GateRequestedEvent } from "./types/events";
 
 type Step = "login" | "avatars" | "team" | "main";
 
@@ -24,6 +27,7 @@ export default function App() {
   const [agents, setAgents] = useState<OnboardingAgent[]>([]);
   const [entering, setEntering] = useState(false);
   const [enterError, setEnterError] = useState<string | null>(null);
+  const [activeGate, setActiveGate] = useState<GateRequestedEvent | null>(null);
 
   useEffect(() => {
     if (gameRef.current && !gameInstance.current) {
@@ -35,6 +39,12 @@ export default function App() {
       gameInstance.current?.destroy(true);
       gameInstance.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    const handler = (ev: GateRequestedEvent) => setActiveGate(ev);
+    wsClient.on("gate", handler);
+    return () => wsClient.off("gate", handler);
   }, []);
 
   const handleEnterVillage = useCallback(async () => {
@@ -64,6 +74,7 @@ export default function App() {
         backstory: a.backstory,
         task_description: a.task_description,
         expected_output: a.expected_output,
+        tools: a.tools ?? [],
       }));
 
       // Replace all agents atomically via PUT /agents/setup
@@ -150,6 +161,14 @@ export default function App() {
         <div className="absolute right-0 top-0 h-full">
           <Sidebar />
         </div>
+      )}
+
+      {/* Gate modal — shown above everything when a gate is requested */}
+      {activeGate && (
+        <GateModal
+          gate={activeGate}
+          onResolved={() => setActiveGate(null)}
+        />
       )}
     </div>
   );

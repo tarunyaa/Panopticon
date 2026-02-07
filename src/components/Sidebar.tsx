@@ -28,6 +28,7 @@ export function Sidebar() {
       backstory: agent.backstory,
       task_description: agent.task_description,
       expected_output: agent.expected_output,
+      tools: agent.tools ?? [],
     });
     setAdding(false);
   };

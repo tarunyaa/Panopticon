@@ -152,10 +152,14 @@ export class VillageScene extends Phaser.Scene {
       camera.setZoom(Math.min(2, camera.zoom + 0.1));
     });
 
-    // Listen for agent intent events → move sprite to task zone + set progress
+    // Listen for agent intent events → show bubble at CAFE, then depart
     const intentHandler = (ev: AgentIntentEvent) => {
-      this.agentRegistry.setTarget(ev.agentName, "WORKSHOP");
-      this.agentRegistry.setProgress(ev.agentName, 0.15);
+      this.agentRegistry.showBubble(ev.agentName, ev.message);
+      // Delay departure so the bubble is visible at the cafe
+      this.time.delayedCall(2000, () => {
+        this.agentRegistry.setTarget(ev.agentName, "WORKSHOP");
+        this.agentRegistry.setProgress(ev.agentName, 0.15);
+      });
     };
     wsClient.on("intent", intentHandler);
 
@@ -167,6 +171,8 @@ export class VillageScene extends Phaser.Scene {
       } else if (ev.type === "TASK_SUMMARY") {
         this.agentRegistry.setTarget(ev.agentName, "HOUSE");
         this.agentRegistry.setProgress(ev.agentName, 1);
+      } else if (ev.type === "GATE_REQUESTED") {
+        this.agentRegistry.setTarget(ev.agentName, "HOUSE");
       } else if (ev.type === "RUN_FINISHED") {
         // All done — agents return to PARK
         this.agentRegistry.moveAllToZone("PARK");
@@ -191,6 +197,7 @@ export class VillageScene extends Phaser.Scene {
   update(): void {
     updateMovement(this.agentRegistry);
     this.agentRegistry.tickProgress();
+    this.agentRegistry.tickBubbles();
 
     // Arrow-key panning
     const panSpeed = 8;

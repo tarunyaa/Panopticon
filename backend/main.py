@@ -23,9 +23,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from events import event_bus
+from events import event_bus, gate_store, GateResponse
 from crew import run_crew
 from zone_infer import infer_zone
+from tools import get_available_tools, TOOL_REGISTRY
 
 executor = ThreadPoolExecutor(max_workers=4)
 
@@ -71,6 +72,7 @@ class CreateAgentRequest(BaseModel):
     backstory: str
     task_description: str
     expected_output: str
+    tools: List[str] = []
 
 
 class SetupAgentItem(BaseModel):
@@ -80,10 +82,16 @@ class SetupAgentItem(BaseModel):
     backstory: str
     task_description: str
     expected_output: str
+    tools: List[str] = []
 
 
 class SetupAgentsRequest(BaseModel):
     agents: List[SetupAgentItem]
+
+
+class GateResponseRequest(BaseModel):
+    action: str  # "approve" | "reject"
+    note: str = ""
 
 
 @app.post("/run", response_model=RunResponse)
@@ -95,6 +103,11 @@ async def start_run(req: RunRequest):
     loop.run_in_executor(executor, run_crew, run_id, req.prompt)
 
     return RunResponse(runId=run_id)
+
+
+@app.get("/tools")
+async def list_tools():
+    return {"tools": get_available_tools()}
 
 
 @app.get("/agents")
@@ -122,6 +135,7 @@ async def get_agents():
             "zone": config.get("zone", "PARK"),
             "task_description": task_info.get("description", "").strip() if task_info else "",
             "expected_output": task_info.get("expected_output", "").strip() if task_info else "",
+            "tools": config.get("tools", []),
         })
 
     return {"agents": agents, "maxAgents": MAX_AGENTS}
@@ -150,6 +164,11 @@ async def create_agent(req: CreateAgentRequest):
         if len(agents_config) >= MAX_AGENTS:
             raise HTTPException(status_code=400, detail=f"Maximum of {MAX_AGENTS} agents reached")
 
+        # Validate tool IDs
+        invalid_tools = [t for t in req.tools if t not in TOOL_REGISTRY]
+        if invalid_tools:
+            raise HTTPException(status_code=400, detail=f"Unknown tool IDs: {invalid_tools}")
+
         # Auto-assign zone round-robin
         zone = ZONES[len(agents_config) % len(ZONES)]
 
@@ -159,6 +178,7 @@ async def create_agent(req: CreateAgentRequest):
             "goal": req.goal,
             "backstory": req.backstory,
             "zone": zone,
+            "tools": req.tools,
         }
 
         # Append to tasks.yaml
@@ -204,6 +224,14 @@ async def setup_agents(req: SetupAgentsRequest):
             raise HTTPException(status_code=400, detail=f"Duplicate agent_id: '{agent.agent_id}'")
         seen_ids.add(agent.agent_id)
 
+        # Validate tool IDs
+        invalid_tools = [t for t in agent.tools if t not in TOOL_REGISTRY]
+        if invalid_tools:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Agent '{agent.agent_id}' has unknown tool IDs: {invalid_tools}",
+            )
+
     # Build YAML dicts and assign zones round-robin
     agents_config: dict = {}
     tasks_config: dict = {}
@@ -217,6 +245,7 @@ async def setup_agents(req: SetupAgentsRequest):
             "goal": agent.goal,
             "backstory": agent.backstory,
             "zone": zone,
+            "tools": agent.tools,
         }
 
         tasks_config[f"{agent.agent_id}_task"] = {
@@ -241,6 +270,17 @@ async def setup_agents(req: SetupAgentsRequest):
             yaml.dump(tasks_config, f, sort_keys=False, default_flow_style=False)
 
     return {"agents": response_agents}
+
+
+@app.post("/runs/{run_id}/gates/{gate_id}")
+async def resolve_gate(run_id: str, gate_id: str, req: GateResponseRequest):
+    if req.action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="action must be 'approve' or 'reject'")
+    response = GateResponse(action=req.action, note=req.note)
+    ok = gate_store.resolve_gate(run_id, gate_id, response)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Gate not found")
+    return {"status": "ok"}
 
 
 @app.websocket("/runs/{run_id}")

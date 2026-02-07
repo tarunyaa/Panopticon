@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AvatarPicker } from "./AvatarPicker";
-import type { OnboardingAgent } from "../../types/onboarding";
+import type { OnboardingAgent, ToolInfo } from "../../types/onboarding";
 import { AVATARS } from "../../types/agents";
+import { API_BASE } from "../../config";
 
 interface AgentFormModalProps {
   initial?: OnboardingAgent | null;
@@ -24,6 +25,21 @@ export function AgentFormModal({
   const [taskDesc, setTaskDesc] = useState(initial?.task_description ?? "");
   const [expectedOutput, setExpectedOutput] = useState(initial?.expected_output ?? "");
   const [spriteKey, setSpriteKey] = useState(initial?.spriteKey ?? "");
+  const [availableTools, setAvailableTools] = useState<ToolInfo[]>([]);
+  const [selectedTools, setSelectedTools] = useState<string[]>(initial?.tools ?? []);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/tools`)
+      .then((res) => res.json())
+      .then((data) => setAvailableTools(data.tools ?? []))
+      .catch(() => {});
+  }, []);
+
+  const toggleTool = (toolId: string) => {
+    setSelectedTools((prev) =>
+      prev.includes(toolId) ? prev.filter((t) => t !== toolId) : [...prev, toolId],
+    );
+  };
 
   const avatarName = AVATARS.find((a) => a.key === spriteKey)?.label ?? "";
   const canSave = role.trim() && goal.trim() && spriteKey;
@@ -38,6 +54,7 @@ export function AgentFormModal({
       task_description: taskDesc.trim(),
       expected_output: expectedOutput.trim(),
       spriteKey,
+      tools: selectedTools,
     });
   };
 
@@ -99,6 +116,41 @@ export function AgentFormModal({
           rows={2}
           className="pixel-inset px-3 py-2 font-pixel text-[10px] text-ink w-full outline-none resize-none"
         />
+
+        {availableTools.length > 0 && (
+          <>
+            <label className="font-pixel text-[8px] text-wood uppercase">Tools</label>
+            <div className="flex flex-wrap gap-2">
+              {availableTools.map((tool) => {
+                const checked = selectedTools.includes(tool.id);
+                const disabled = !tool.available;
+                return (
+                  <label
+                    key={tool.id}
+                    className={`flex items-center gap-1.5 px-2 py-1 pixel-inset cursor-pointer select-none ${
+                      disabled ? "opacity-40 cursor-not-allowed" : ""
+                    }`}
+                    title={tool.description + (disabled ? ` (needs ${tool.requires_key})` : "")}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => !disabled && toggleTool(tool.id)}
+                      className="accent-accent-amber w-3 h-3"
+                    />
+                    <span className="font-pixel text-[8px] text-ink">{tool.label}</span>
+                    {disabled && (
+                      <span className="font-pixel text-[7px] text-accent-coral">
+                        needs key
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         <div className="flex gap-2 mt-2">
           <button

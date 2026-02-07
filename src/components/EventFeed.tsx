@@ -125,6 +125,19 @@ function EventEntry({
         </div>
       );
 
+    case "GATE_REQUESTED": {
+      const gateDot = agentDotMap[event.agentName] || "bg-wood";
+      return (
+        <div className="pixel-inset px-2 py-1.5 text-[8px] text-accent-amber !bg-accent-amber/10 !border-accent-amber/40">
+          <span
+            className={`inline-block w-1.5 h-1.5 ${gateDot} border border-wood-dark mr-1 align-middle`}
+          />
+          <span className="uppercase tracking-widest">Gate</span>{" "}
+          <span className="text-ink">{event.agentName} awaiting approval</span>
+        </div>
+      );
+    }
+
     case "ERROR":
       return (
         <div className="pixel-inset px-2 py-1 text-[8px] text-accent-coral !bg-accent-coral/10 !border-accent-coral/40">

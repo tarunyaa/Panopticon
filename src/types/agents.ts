@@ -27,6 +27,7 @@ export interface CreateAgentPayload {
   backstory: string;
   task_description: string;
   expected_output: string;
+  tools: string[];
 }
 
 export const SLOT_COLORS = [

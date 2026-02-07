@@ -12,12 +12,15 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "panopticon", ".env"))
 
 from events import (
     event_bus,
+    gate_store,
     AgentIntentEvent,
     TaskSummaryEvent,
+    GateRequestedEvent,
     RunStartedEvent,
     RunFinishedEvent,
     ErrorEvent,
 )
+from tools import instantiate_tools
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -109,8 +112,15 @@ def _make_intent_step_callback(run_id: str, agent_name: str, zone: str, role: st
     return callback
 
 
-def _make_task_callback(run_id: str, agent_name: str, zone: str):
-    """Emit a TASK_SUMMARY when the agent's task finishes."""
+def _make_task_callback(
+    run_id: str,
+    agent_name: str,
+    zone: str,
+    task_index: int,
+    total_tasks: int,
+    tasks_list: list,
+):
+    """Emit a TASK_SUMMARY when the agent's task finishes, then gate."""
 
     def callback(task_output):
         cleaned = _clean_crewai_output(str(task_output))
@@ -123,6 +133,37 @@ def _make_task_callback(run_id: str, agent_name: str, zone: str):
                 fullOutput=cleaned,
             ),
         )
+
+        # Skip gate on last task — nothing left to approve
+        is_last = task_index == total_tasks - 1
+        if is_last:
+            return
+
+        # Create gate and block until user responds
+        gate_id, gate_event = gate_store.create_gate(run_id)
+        event_bus.emit(
+            run_id,
+            GateRequestedEvent(
+                gateId=gate_id,
+                runId=run_id,
+                agentName=agent_name,
+                question=f"{agent_name} finished their task. Continue to the next task?",
+                context=summary,
+            ),
+        )
+
+        resolved = gate_event.wait(timeout=600)
+        if not resolved:
+            raise RuntimeError(f"Gate timed out for {agent_name} (10 min)")
+
+        response = gate_store.get_response(run_id, gate_id)
+        if response is None or response.action == "reject":
+            raise RuntimeError(f"Run rejected by user at {agent_name}'s gate")
+
+        # Approved — append human feedback to the next task if provided
+        if response.note and task_index + 1 < len(tasks_list):
+            next_task = tasks_list[task_index + 1]
+            next_task.description += f"\n\n[Human feedback]: {response.note}"
 
     return callback
 
@@ -145,18 +186,22 @@ def run_crew(run_id: str, prompt: str) -> str:
             zone = config.get("zone", "PARK")
             agent_name = key.replace("_", " ").title()
 
+            agent_tools = instantiate_tools(config.get("tools", []))
+
             agents[key] = Agent(
                 role=config["role"].strip(),
                 goal=config["goal"].strip(),
                 backstory=config["backstory"].strip(),
                 verbose=True,
                 llm=LLM(model="anthropic/claude-sonnet-4-20250514"),
+                tools=agent_tools,
                 step_callback=_make_intent_step_callback(
                     run_id, agent_name, zone, config["role"]
                 ),
             )
 
         task_items = list(tasks_config.items())
+        total_tasks = len(task_items)
         tasks = []
         for i, (key, config) in enumerate(task_items):
             agent_key = config["agent"]
@@ -172,7 +217,12 @@ def run_crew(run_id: str, prompt: str) -> str:
                 description=desc.format(prompt=prompt),
                 expected_output=config["expected_output"].strip(),
                 agent=agents[agent_key],
-                callback=_make_task_callback(run_id, agent_name, zone),
+                callback=_make_task_callback(
+                    run_id, agent_name, zone,
+                    task_index=i,
+                    total_tasks=total_tasks,
+                    tasks_list=tasks,
+                ),
                 async_execution=not is_last,
                 **({"context": list(tasks)} if is_last else {}),
             )
@@ -198,3 +248,5 @@ def run_crew(run_id: str, prompt: str) -> str:
         event_bus.emit(run_id, ErrorEvent(message=str(e)))
         event_bus.emit(run_id, RunFinishedEvent(runId=run_id))
         return f"Error: {e}"
+    finally:
+        gate_store.cleanup(run_id)
