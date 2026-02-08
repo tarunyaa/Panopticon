@@ -322,7 +322,7 @@ of LangGraph would do.
 | `events.py` | `GateStore` uses `threading.Event.wait(600)` — blocks a thread for up to 10 min, no persistence, no crash recovery. |
 | `activity_callbacks.py` | Synchronous `BaseCallbackHandler` in async code. |
 | `crew.py` | Dead code — 388 lines of CrewAI logic no longer imported by anything. |
-| `zone_infer.py` | Never imported. All agents hardcoded to `zone="WORKSHOP"`. |
+| `zone_infer.py` | Deleted. Zones are event-driven, not role-inferred. |
 
 ---
 
@@ -575,7 +575,7 @@ def translate_event(event: dict) -> dict | None:
         return {
             "type": "AGENT_INTENT",
             "agentName": event["name"],
-            "zone": infer_zone(...),    # Wire in zone_infer.py
+            "zone": "WORKSHOP",         # Hardcoded — see D2 zone semantics
             "message": f"Started working.",
         }
 
@@ -831,28 +831,30 @@ With `interrupt()` + checkpointer handling gate persistence and resumption:
 Review each test file — keep tests that validate LangChain-era logic, delete those
 that import or reference `crewai`.
 
-### D2. Wire `zone_infer.py` into agent nodes
+### D2. Zone semantics (hardcoded, event-driven)
 
-`zone_infer.py` implements keyword-based zone inference (HOUSE, WORKSHOP, CAFE, PARK)
-but is never imported. Currently every agent is hardcoded to `zone="WORKSHOP"` in
-`graph.py:167`.
+`zone_infer.py` has been deleted. Zones are NOT inferred from agent role keywords —
+they are determined by **what the agent is doing** at any given moment. The frontend
+`VillageScene.ts` event handler routes agents to the correct zone based on the event type:
 
-In the Phase B translation layer, use `infer_zone()` to set the correct zone when
-emitting `AGENT_INTENT` events:
+| Zone | Tile Coords | Pixel Coords | When |
+|------|------------|-------------|------|
+| **HOUSE** | 109, 33 | 3488, 1056 | Agent needs user interaction (gates, approval, feedback) |
+| **WORKSHOP** | 77,47 / 77,51 / 90,51 / 90,47 | 2464,1504 / 2464,1632 / 2880,1632 / 2880,1504 | Agent is actively working (LLM calls, tool calls) |
+| **CAFE** | 79, 25 | 2528, 800 | Agent-to-agent handoff (receiving/sending context) |
+| **PARK** | 91, 33 | 2912, 1056 | Spawn point, idle with no tasks |
+| **DORM** | 120, 50 | 3840, 1600 | Idle after completing work |
 
-```python
-from .zone_infer import infer_zone
+**Event → Zone mapping in VillageScene.ts:**
+- `RUN_STARTED` → all agents to CAFE (discussing incoming task)
+- `AGENT_INTENT` → show bubble, then agent to WORKSHOP (starting work)
+- `TASK_HANDOFF` → receiving + source agents to CAFE (context handoff)
+- `TASK_SUMMARY` → agent to DORM (task done, idle)
+- `GATE_REQUESTED` → agent to HOUSE (needs user approval)
+- `RUN_FINISHED` → all agents to DORM (run complete)
 
-zone = infer_zone(
-    role=agent_config["role"],
-    goal=agent_config["goal"],
-    backstory=agent_config["backstory"],
-    task_description=task_config["description"],
-)
-```
-
-This makes the pixel-art village actually reflect what agents are doing — researchers
-go to WORKSHOP, writers go to CAFE, planners go to HOUSE.
+WORKSHOP has 4 coordinate options — each agent is randomly assigned one to
+avoid stacking. All other zones use a single coordinate with offset spacing.
 
 ### D3. Use `with_structured_output` in `plan_task_delegation`
 
@@ -897,7 +899,7 @@ that are not part of the actual application. Delete the entire directory.
 |------|--------|
 | `backend/crew.py` | Delete |
 | `backend/test_*.py` (CrewAI ones) | Delete or rewrite |
-| `backend/graph.py` | Wire `zone_infer.py` |
+| `backend/graph.py` | Zone routing is event-driven (see D2) |
 | `backend/planner.py` | Use `with_structured_output` |
 | `docs/summary.md` | Update references |
 | `panopticon/` | Delete directory |

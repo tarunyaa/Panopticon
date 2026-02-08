@@ -198,7 +198,8 @@ export class VillageScene extends Phaser.Scene {
           );
         });
       } else if (ev.type === "TASK_SUMMARY") {
-        this.agentRegistry.setTarget(ev.agentName, "HOUSE");
+        // Task done — agent goes idle at DORM (HOUSE is only for gates)
+        this.agentRegistry.setTarget(ev.agentName, "DORM");
         this.agentRegistry.setProgress(ev.agentName, 1);
       } else if (ev.type === "GATE_REQUESTED") {
         this.agentRegistry.setTarget(ev.agentName, "HOUSE");

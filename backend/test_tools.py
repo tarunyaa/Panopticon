@@ -25,7 +25,7 @@ def test_imports():
         ("events", "from events import event_bus, EventBus"),
         ("tools", "from tools import get_available_tools, terminal"),
         ("planner", "from planner import plan_team, plan_task_delegation"),
-        ("crew", "from crew import run_crew"),
+        ("graph", "from graph import run_graph"),
         ("gate_policy", "from gate_policy import should_gate_task_complete"),
         ("activity_callbacks", "from activity_callbacks import ActivityTracker"),
     ]
