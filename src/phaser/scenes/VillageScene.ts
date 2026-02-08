@@ -157,6 +157,7 @@ export class VillageScene extends Phaser.Scene {
     // Listen for agent intent events → show bubble at CAFE, then depart
     const intentHandler = (ev: AgentIntentEvent) => {
       this.agentRegistry.showBubble(ev.agentName, ev.message);
+      this.agentRegistry.logEvent(ev.agentName, `\u{1F4AC} ${ev.message}`);
       // Delay departure so the bubble is visible at the cafe
       this.time.delayedCall(2000, () => {
         this.agentRegistry.setTarget(ev.agentName, "WORKSHOP");
@@ -175,6 +176,15 @@ export class VillageScene extends Phaser.Scene {
       } else if (ev.type === "TASK_HANDOFF") {
         // Dependency handoff — agents meet at CAFE to exchange outputs
         this.agentRegistry.setTarget(ev.receivingAgent, "CAFE");
+
+        // Show connection lines between source and receiver
+        this.agentRegistry.showHandoffLink(ev.sourceAgents, ev.receivingAgent);
+
+        // Log the handoff for both sides
+        this.agentRegistry.logEvent(ev.receivingAgent, `\u{1F4E5} Receiving from ${ev.sourceAgents.join(", ")}`);
+        ev.sourceAgents.forEach((src) => {
+          this.agentRegistry.logEvent(src, `\u{1F4E4} Handing off to ${ev.receivingAgent}`);
+        });
 
         // Source agents return to CAFE and share what they produced
         ev.sourceAgents.forEach((sourceAgent, index) => {
@@ -198,16 +208,18 @@ export class VillageScene extends Phaser.Scene {
       } else if (ev.type === "TASK_SUMMARY") {
         // Cache summary for use in handoff bubbles
         this.agentSummaries[ev.agentName] = ev.summary;
+        this.agentRegistry.logEvent(ev.agentName, `\u2705 Done: ${ev.summary.slice(0, 60)}`);
         // Task done — agent goes idle at DORM (HOUSE is only for gates)
         this.agentRegistry.setTarget(ev.agentName, "DORM");
         this.agentRegistry.setProgress(ev.agentName, 1);
       } else if (ev.type === "GATE_REQUESTED") {
         this.agentRegistry.setTarget(ev.agentName, "HOUSE");
+        this.agentRegistry.logEvent(ev.agentName, `\u{1F6D1} Gate: ${ev.question}`);
       } else if (ev.type === "RUN_FINISHED") {
         // All done — agents return to DORM (idle)
         this.agentRegistry.moveAllToZone("DORM");
       } else if (ev.type === "AGENT_ACTIVITY") {
-        // Update agent activity state
+        // Update agent activity state (also logs internally)
         this.agentRegistry.setActivity(ev.agentName, ev.activity, ev.details);
       }
     };
@@ -232,6 +244,8 @@ export class VillageScene extends Phaser.Scene {
     this.agentRegistry.tickProgress();
     this.agentRegistry.tickBubbles();
     this.agentRegistry.tickActivityIcons();
+    this.agentRegistry.tickInspectPanel();
+    this.agentRegistry.tickHandoffLines();
 
     // Arrow-key panning
     const panSpeed = 8;

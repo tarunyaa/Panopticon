@@ -314,6 +314,7 @@ function EventEntry({
     case "AGENT_ACTIVITY": {
       const dot = agentDotMap[event.agentName] || "bg-wood";
       if (event.activity === "tool_call") {
+        const tool = event.toolName || "tool";
         return (
           <div className="flex items-start gap-1.5 px-1 ml-2 text-[7px] text-wood-light">
             <span
@@ -322,7 +323,7 @@ function EventEntry({
             <span className="flex-1">
               <span className="text-accent-purple">{"\u2692"}</span>{" "}
               <span className="text-ink">{event.agentName}</span>{" "}
-              <span>{event.details || "using tool"}</span>
+              <span className="text-accent-amber font-bold">{tool}</span>
             </span>
             {relTime && <span className="text-[6px] text-wood-light/60 tabular-nums shrink-0">{relTime}</span>}
           </div>

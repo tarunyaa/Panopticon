@@ -24,3 +24,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Agent workspace files (keep dirs via .gitkeep)
+backend/workspace/input/*
+backend/workspace/output/*
+!backend/workspace/input/.gitkeep
+!backend/workspace/output/.gitkeep

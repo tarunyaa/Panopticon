@@ -1,29 +1,37 @@
-carlos_task:
+adam_task:
   description: Coordinate team members and ensure objectives are met.
   expected_output: Successful team coordination and project completion.
-  agent: carlos
+  agent: adam
 abigail_task:
-  description: 'Research the following topic thoroughly. Gather key facts, statistics
-    with sources, expert quotes or perspectives, real-world examples, current trends,
-    and any competing viewpoints that should be addressed: {prompt}'
-  expected_output: A research brief with organized facts grouped by subtopic, statistics
-    with source citations, notable quotes or perspectives, concrete examples, and
-    a summary of current trends and debates.
+  description: 'Create an original haiku about: {prompt}'
+  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
+    and emotional resonance related to the theme
   agent: abigail
+carlos_task:
+  description: 'Create an original haiku about: {prompt}'
+  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
+    and emotional resonance related to the theme
+  agent: carlos
 isabella_task:
-  description: 'Analyze the target audience and design the content approach for the
-    following request. Define the angle, outline the structure with section descriptions,
-    identify key messages, set tone guidelines, and suggest SEO keywords: {prompt}'
-  expected_output: A content strategy with target audience profile, chosen angle with
-    rationale, detailed outline with section-by-section descriptions, key messages
-    to convey, tone and style guidelines, and target SEO keywords.
+  description: 'Create an original haiku about: {prompt}'
+  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
+    and emotional resonance related to the theme
   agent: isabella
 klaus_task:
-  description: 'Using the research findings and content strategy from your teammates,
-    write the final polished piece for the following request. Weave in facts and examples
-    from the research, follow the structure and tone from the strategy, and ensure
-    a compelling narrative throughout: {prompt}'
-  expected_output: Complete, publication-ready content with proper formatting, facts
-    and examples woven into the narrative, citations where appropriate, and a compelling
-    arc from introduction to conclusion.
+  description: 'Create an original haiku about: {prompt}'
+  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
+    and emotional resonance related to the theme
   agent: klaus
+ayesha_task:
+  description: 'Create an original haiku about: {prompt}'
+  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
+    and emotional resonance related to the theme
+  agent: ayesha
+eddy_task:
+  description: 'Create an evaluation rubric and provide detailed analysis for haikus
+    about: {prompt}'
+  expected_output: A comprehensive evaluation rubric with 4-6 criteria (each with
+    clear descriptors), followed by individual analysis of each submitted haiku scored
+    against the rubric, highlighting strengths and distinctive qualities to help the
+    user make an informed selection
+  agent: eddy

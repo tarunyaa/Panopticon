@@ -158,30 +158,106 @@ def web_scraper(url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# File writer tool
+# Workspace paths
+# ---------------------------------------------------------------------------
+
+_WORKSPACE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace")
+_INPUT_DIR = os.path.join(_WORKSPACE_DIR, "input")
+_OUTPUT_DIR = os.path.join(_WORKSPACE_DIR, "output")
+
+# Ensure workspace directories exist at import time
+os.makedirs(_INPUT_DIR, exist_ok=True)
+os.makedirs(_OUTPUT_DIR, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# File reader tool (reads from workspace/input/)
+# ---------------------------------------------------------------------------
+
+@tool
+def file_reader(file_name: str) -> str:
+    """Read a file from the input folder.
+
+    Args:
+        file_name: The name of the file to read (e.g. "brief.txt", "data.csv").
+                   Subdirectories are allowed (e.g. "subdir/file.txt").
+    """
+    try:
+        safe_path = os.path.normpath(file_name)
+        if safe_path.startswith("..") or os.path.isabs(safe_path):
+            return "Error: path must be relative and inside the input folder"
+
+        abs_path = os.path.join(_INPUT_DIR, safe_path)
+        if not os.path.abspath(abs_path).startswith(os.path.abspath(_INPUT_DIR)):
+            return "Error: path escapes the input folder"
+
+        if not os.path.exists(abs_path):
+            return f"Error: file '{file_name}' not found in input folder"
+
+        with open(abs_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if len(content) > _MAX_OUTPUT:
+            content = content[:_MAX_OUTPUT] + f"\n... (truncated at {_MAX_OUTPUT} chars)"
+        return content or "(empty file)"
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+
+# ---------------------------------------------------------------------------
+# List input files tool
+# ---------------------------------------------------------------------------
+
+@tool
+def list_input_files() -> str:
+    """List all files available in the input folder."""
+    try:
+        files = []
+        for root, dirs, filenames in os.walk(_INPUT_DIR):
+            for fname in filenames:
+                if fname.startswith("."):
+                    continue
+                rel = os.path.relpath(os.path.join(root, fname), _INPUT_DIR)
+                files.append(rel)
+        if not files:
+            return "(no files in input folder)"
+        return "\n".join(sorted(files))
+    except Exception as e:
+        return f"Error listing files: {e}"
+
+
+# ---------------------------------------------------------------------------
+# File writer tool (writes to workspace/output/)
 # ---------------------------------------------------------------------------
 
 class FileWriteInput(BaseModel):
-    file_path: str = Field(description="The path to the file to write")
+    file_path: str = Field(description="The file name/path to write inside the output folder (e.g. 'report.md', 'results/data.csv')")
     content: str = Field(description="The content to write to the file")
 
 
 @tool(args_schema=FileWriteInput)
 def file_writer(file_path: str, content: str) -> str:
-    """Write content to a file on disk.
+    """Write content to a file in the output folder.
 
     Args:
-        file_path: The path to the file to write.
+        file_path: Relative path inside the output folder (e.g. "report.md").
         content: The content to write to the file.
     """
     try:
-        # Basic safety: prevent writing outside working directory
-        import os.path
-        abs_path = os.path.abspath(file_path)
+        safe_path = os.path.normpath(file_path)
+        if safe_path.startswith("..") or os.path.isabs(safe_path):
+            return "Error: path must be relative and inside the output folder"
+
+        abs_path = os.path.join(_OUTPUT_DIR, safe_path)
+        if not os.path.abspath(abs_path).startswith(os.path.abspath(_OUTPUT_DIR)):
+            return "Error: path escapes the output folder"
+
+        # Create subdirectories if needed
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
 
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"Successfully wrote {len(content)} characters to {file_path}"
+        return f"Successfully wrote {len(content)} characters to output/{file_path}"
     except Exception as e:
         return f"Error writing file: {e}"
 
@@ -212,10 +288,24 @@ TOOL_REGISTRY: dict[str, dict] = {
         "env_key": None,
         "factory": lambda: terminal,
     },
+    "file_reader": {
+        "id": "file_reader",
+        "label": "File Reader",
+        "description": "Read files from the input folder",
+        "env_key": None,
+        "factory": lambda: file_reader,
+    },
+    "list_input_files": {
+        "id": "list_input_files",
+        "label": "List Input Files",
+        "description": "List all files available in the input folder",
+        "env_key": None,
+        "factory": lambda: list_input_files,
+    },
     "file_writer": {
         "id": "file_writer",
         "label": "File Writer",
-        "description": "Write content to files on disk",
+        "description": "Write content to files in the output folder",
         "env_key": None,
         "factory": lambda: file_writer,
     },

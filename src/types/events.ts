@@ -63,8 +63,9 @@ export interface GateRecommendedEvent {
 export interface AgentActivityEvent {
   type: "AGENT_ACTIVITY";
   agentName: string;
-  activity: "idle" | "tool_call" | "llm_generating";
+  activity: "idle" | "tool_call" | "llm_generating" | "planning";
   details: string;
+  toolName?: string;
 }
 
 export interface TaskHandoffEvent {

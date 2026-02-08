@@ -7,7 +7,7 @@ import { TEMPLATES } from "../../types/onboarding";
 import { AVATARS } from "../../types/agents";
 import { API_BASE } from "../../config";
 
-const MAX_AGENTS = 6;
+const MAX_AGENTS = 9;
 
 type Phase = "input" | "chatting" | "review";
 

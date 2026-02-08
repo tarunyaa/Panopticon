@@ -16,7 +16,7 @@ _dir = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_dir, "..", ".env"))
 
 import yaml
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -24,7 +24,7 @@ from langgraph.types import Command
 
 from .events import GateResponse, GatingMode
 from .graph import build_execution_graph, _summarize_output
-from .tools import get_available_tools, TOOL_REGISTRY
+from .tools import get_available_tools, TOOL_REGISTRY, _INPUT_DIR, _OUTPUT_DIR
 from .planner import plan_team, plan_task_delegation
 
 
@@ -42,7 +42,7 @@ _yaml_lock = threading.Lock()
 AGENTS_YAML = os.path.join(_dir, "agents.yaml")
 TASKS_YAML = os.path.join(_dir, "tasks.yaml")
 
-MAX_AGENTS = 6
+MAX_AGENTS = 9
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +200,7 @@ def translate_event(
             "agentName": agent_name,
             "activity": "tool_call",
             "details": f"Using {tool_name}",
+            "toolName": tool_name,
         })
         return results
 
@@ -292,14 +293,14 @@ async def get_agents():
     agents = []
     for agent_id, config in agents_config.items():
         role = config.get("role", "")
-        if "leader" in role.lower():
-            continue
+        is_leader = "leader" in role.lower()
 
         task_info = {}
-        for task_key, task_config in tasks_config.items():
-            if task_config.get("agent") == agent_id:
-                task_info = task_config
-                break
+        if not is_leader:
+            for task_key, task_config in tasks_config.items():
+                if task_config.get("agent") == agent_id:
+                    task_info = task_config
+                    break
 
         agents.append({
             "id": agent_id,
@@ -310,6 +311,7 @@ async def get_agents():
             "task_description": task_info.get("description", "").strip() if task_info else "",
             "expected_output": task_info.get("expected_output", "").strip() if task_info else "",
             "tools": config.get("tools", []),
+            "isLeader": is_leader,
         })
 
     return {"agents": agents, "maxAgents": MAX_AGENTS}
@@ -430,6 +432,110 @@ async def setup_agents(req: SetupAgentsRequest):
 
 
 # ---------------------------------------------------------------------------
+# Workspace file endpoints
+# ---------------------------------------------------------------------------
+
+def _list_workspace_files(directory: str) -> list[dict]:
+    """List files in a workspace directory with metadata."""
+    files = []
+    for root, dirs, filenames in os.walk(directory):
+        for fname in filenames:
+            if fname.startswith("."):
+                continue
+            full = os.path.join(root, fname)
+            rel = os.path.relpath(full, directory)
+            files.append({
+                "name": rel,
+                "size": os.path.getsize(full),
+            })
+    return sorted(files, key=lambda f: f["name"])
+
+
+@app.get("/workspace/input")
+async def list_input_files():
+    return {"files": _list_workspace_files(_INPUT_DIR)}
+
+
+@app.get("/workspace/output")
+async def list_output_files():
+    return {"files": _list_workspace_files(_OUTPUT_DIR)}
+
+
+@app.post("/workspace/input")
+async def upload_input_file(file: UploadFile = File(...)):
+    """Upload a file to the input folder."""
+    file_name = file.filename or "upload"
+    safe = os.path.normpath(file_name)
+    if safe.startswith("..") or os.path.isabs(safe):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+
+    abs_path = os.path.join(_INPUT_DIR, safe)
+    if not os.path.abspath(abs_path).startswith(os.path.abspath(_INPUT_DIR)):
+        raise HTTPException(status_code=400, detail="Path escapes input folder")
+
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+
+    content = await file.read()
+    with open(abs_path, "wb") as f:
+        f.write(content)
+
+    return {"status": "ok", "name": safe, "size": len(content)}
+
+
+@app.delete("/workspace/input/{file_name:path}")
+async def delete_input_file(file_name: str):
+    safe = os.path.normpath(file_name)
+    if safe.startswith("..") or os.path.isabs(safe):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    abs_path = os.path.join(_INPUT_DIR, safe)
+    if not os.path.abspath(abs_path).startswith(os.path.abspath(_INPUT_DIR)):
+        raise HTTPException(status_code=400, detail="Path escapes input folder")
+
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    os.remove(abs_path)
+    return {"status": "ok"}
+
+
+@app.get("/workspace/output/{file_name:path}")
+async def get_output_file(file_name: str):
+    """Read an output file's content."""
+    from fastapi.responses import FileResponse
+
+    safe = os.path.normpath(file_name)
+    if safe.startswith("..") or os.path.isabs(safe):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    abs_path = os.path.join(_OUTPUT_DIR, safe)
+    if not os.path.abspath(abs_path).startswith(os.path.abspath(_OUTPUT_DIR)):
+        raise HTTPException(status_code=400, detail="Path escapes output folder")
+
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(abs_path, filename=os.path.basename(abs_path))
+
+
+@app.delete("/workspace/output/{file_name:path}")
+async def delete_output_file(file_name: str):
+    safe = os.path.normpath(file_name)
+    if safe.startswith("..") or os.path.isabs(safe):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    abs_path = os.path.join(_OUTPUT_DIR, safe)
+    if not os.path.abspath(abs_path).startswith(os.path.abspath(_OUTPUT_DIR)):
+        raise HTTPException(status_code=400, detail="Path escapes output folder")
+
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    os.remove(abs_path)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
 # Gate resolution endpoint
 # ---------------------------------------------------------------------------
 
@@ -473,8 +579,40 @@ async def run_websocket(websocket: WebSocket, run_id: str):
             with open(TASKS_YAML, "r") as f:
                 tasks_config = yaml.safe_load(f) or {}
 
-        # 3. Plan task delegation (CPU-bound LLM call — run in thread)
+        # 3. Find leader agent name
+        leader_name = None
+        for agent_id, cfg in agents_config.items():
+            if "leader" in cfg.get("role", "").lower():
+                leader_name = agent_id
+                break
+
+        # 4. Send RUN_STARTED (before planning so frontend shows agents gathering)
+        await websocket.send_text(json.dumps({
+            "type": "RUN_STARTED",
+            "runId": run_id,
+            "prompt": prompt,
+        }))
+
+        # 5. Signal leader is planning — whiteboard emoji appears
+        if leader_name:
+            await websocket.send_text(json.dumps({
+                "type": "AGENT_ACTIVITY",
+                "agentName": leader_name,
+                "activity": "planning",
+                "details": "Planning task delegation...",
+            }))
+
+        # 6. Plan task delegation (CPU-bound LLM call — run in thread)
         delegation_result = await asyncio.to_thread(plan_task_delegation, prompt)
+
+        # 7. Leader done planning
+        if leader_name:
+            await websocket.send_text(json.dumps({
+                "type": "AGENT_ACTIVITY",
+                "agentName": leader_name,
+                "activity": "idle",
+                "details": "",
+            }))
 
         if delegation_result["type"] == "error":
             await websocket.send_text(json.dumps({
@@ -486,7 +624,7 @@ async def run_websocket(websocket: WebSocket, run_id: str):
 
         delegation_plan = delegation_result["plan"]
 
-        # 4. Build execution graph
+        # 8. Build execution graph
         compiled_graph, node_meta = build_execution_graph(
             delegation_plan=delegation_plan,
             agents_config=agents_config,
@@ -497,14 +635,7 @@ async def run_websocket(websocket: WebSocket, run_id: str):
         worker_nodes = set(node_meta.keys())
         _run_graphs[run_id] = compiled_graph
 
-        # 5. Send RUN_STARTED
-        await websocket.send_text(json.dumps({
-            "type": "RUN_STARTED",
-            "runId": run_id,
-            "prompt": prompt,
-        }))
-
-        # 6. Streaming loop with interrupt/resume
+        # 9. Streaming loop with interrupt/resume
         graph_input: dict | Command = {
             "prompt": prompt,
             "run_id": run_id,
@@ -571,7 +702,7 @@ async def run_websocket(websocket: WebSocket, run_id: str):
 
             graph_input = Command(resume=response)
 
-        # 7. Send RUN_FINISHED
+        # 10. Send RUN_FINISHED
         await websocket.send_text(json.dumps({
             "type": "RUN_FINISHED",
             "runId": run_id,

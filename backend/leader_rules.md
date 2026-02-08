@@ -21,8 +21,8 @@ Your final response MUST output **exactly two YAML documents and nothing else**:
 
 These YAML files are the **final output** of the team-building task and must be ready to write directly to disk.
 
-You must propose **3–4 agents total** (including yourself as Leader).  
-Hard cap: **4 agents**.
+You must propose **3–9 agents total** (including yourself as Leader).
+Default to **3–4 agents** unless the user requests more.
 
 ---
 
@@ -81,8 +81,9 @@ Stop asking questions once you can confidently define:
 ## 2) Team Composition Rules
 
 ### Team Size
-- Default to **3 agents**
-- Use **4 agents** only if it clearly improves quality without slowing execution
+- Default to **3–4 agents**
+- The user may specify a desired number of agents in their team description (e.g., "I want a team of 6 agents"). If they do, respect that number (up to 8 workers + 1 Leader = 9 total).
+- Use more than 4 agents only when the user requests it or the domain clearly benefits from additional specialization
 
 ### Leader Requirement
 - You MUST include yourself as the Leader in `agents.yaml`
@@ -176,7 +177,7 @@ eddy_task:
 
 Before outputting the final YAML files, verify **all** of the following:
 
-- Team size is **3–4 agents total**
+- Team size is **3–9 agents total**
 - You are included as **Leader**
 - Each agent has **exactly one task**
 - Every task includes the `{prompt}` placeholder

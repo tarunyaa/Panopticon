@@ -7,7 +7,7 @@ const API = API_BASE;
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [maxAgents, setMaxAgents] = useState(6);
+  const [maxAgents, setMaxAgents] = useState(9);
   const [loading, setLoading] = useState(true);
 
   const fetchAgents = useCallback(async () => {

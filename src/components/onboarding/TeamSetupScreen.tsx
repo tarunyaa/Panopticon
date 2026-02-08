@@ -6,7 +6,7 @@ import type { OnboardingAgent } from "../../types/onboarding";
 import { TEMPLATES } from "../../types/onboarding";
 import { AVATARS } from "../../types/agents";
 
-const MAX_AGENTS = 6;
+const MAX_AGENTS = 9;
 
 interface TeamSetupScreenProps {
   leaderAvatar: { spriteKey: string; name: string };

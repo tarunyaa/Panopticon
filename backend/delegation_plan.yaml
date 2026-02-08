@@ -2,11 +2,23 @@ tasks:
 - task_key: abigail_task
   async_execution: false
   dependencies: []
+- task_key: carlos_task
+  async_execution: false
+  dependencies: []
 - task_key: isabella_task
   async_execution: false
   dependencies: []
 - task_key: klaus_task
   async_execution: false
+  dependencies: []
+- task_key: ayesha_task
+  async_execution: false
+  dependencies: []
+- task_key: eddy_task
+  async_execution: false
   dependencies:
   - abigail_task
+  - carlos_task
   - isabella_task
+  - klaus_task
+  - ayesha_task

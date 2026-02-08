@@ -58,8 +58,16 @@ function moveAgent(agent: AgentEntry): void {
     const bounds = agent.speechText.getBounds();
     const pad = 6;
     agent.speechBg.clear();
-    agent.speechBg.fillStyle(0x000000, 0.75);
+    agent.speechBg.fillStyle(0xE8DCC8, 0.92);
+    agent.speechBg.lineStyle(1, 0xC4B898, 1);
     agent.speechBg.fillRoundedRect(
+      bounds.x - pad,
+      bounds.y - pad,
+      bounds.width + pad * 2,
+      bounds.height + pad * 2,
+      6
+    );
+    agent.speechBg.strokeRoundedRect(
       bounds.x - pad,
       bounds.y - pad,
       bounds.width + pad * 2,

@@ -6,6 +6,7 @@ export interface AgentInfo {
   zone: string;
   task_description: string;
   expected_output: string;
+  isLeader?: boolean;
 }
 
 // Character avatar sprites — assigned round-robin to agent slots
@@ -37,6 +38,8 @@ export const SLOT_COLORS = [
   { bg: "bg-accent-purple", text: "text-accent-purple", border: "border-accent-purple" },
   { bg: "bg-accent-amber", text: "text-accent-amber", border: "border-accent-amber" },
   { bg: "bg-accent-teal", text: "text-accent-teal", border: "border-accent-teal" },
+  { bg: "bg-accent-coral", text: "text-accent-coral", border: "border-accent-coral" },
+  { bg: "bg-accent-blue", text: "text-accent-blue", border: "border-accent-blue" },
 ];
 
 // Hex colors for Phaser sprites — matches SLOT_COLORS order
@@ -47,6 +50,8 @@ export const PHASER_COLORS: number[] = [
   0xb8a9c9, // purple
   0xd4a843, // amber
   0x5fb8a0, // teal
+  0xc97b7b, // rose
+  0x7bc9a3, // mint
 ];
 
 // Sprite keys + asset paths — single source of truth for preload and def mapping

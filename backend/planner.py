@@ -47,7 +47,7 @@ class AgentSpec(BaseModel):
 
 
 class CreateTeamInput(BaseModel):
-    agents: list[AgentSpec] = Field(description="List of 3-4 agents including the Leader")
+    agents: list[AgentSpec] = Field(description="List of 3-9 agents including the Leader")
 
 
 class DelegationTaskEntry(BaseModel):
@@ -77,15 +77,15 @@ def ask_question(question: str) -> str:
 
 @tool(args_schema=CreateTeamInput)
 def create_team_files(agents: list[dict]) -> str:
-    """Generate the final team configuration with 3-4 agents.
+    """Generate the final team configuration with 3-9 agents.
     Each agent must have: key, role, goal, backstory, tools, task_description, expected_output.
     The task_description MUST include a {prompt} placeholder.
     One agent MUST have role=Leader.
     """
     try:
         # Validate
-        if len(agents) < 3 or len(agents) > 4:
-            return f"Error: Must have 3-4 agents, got {len(agents)}"
+        if len(agents) < 3 or len(agents) > 9:
+            return f"Error: Must have 3-9 agents, got {len(agents)}"
 
         has_leader = False
         agents_config = {}
@@ -156,7 +156,7 @@ def _load_leader_rules() -> str:
     """Load the leader_rules.md content to use as system prompt."""
     rules_path = _dir / "leader_rules.md"
     if not rules_path.exists():
-        return "You are a team planning expert. Design a 3-4 agent team to solve the user's task."
+        return "You are a team planning expert. Design a team of 3-9 agents to solve the user's task."
     with open(rules_path, "r", encoding="utf-8") as f:
         return f.read()
 
