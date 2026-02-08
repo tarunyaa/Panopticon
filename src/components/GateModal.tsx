@@ -48,6 +48,14 @@ export function GateModal({ gate, onResolved }: GateModalProps) {
           </span>
         </div>
 
+        {gate.reason && (
+          <div className="pixel-inset px-3 py-1.5 bg-accent-blue/10">
+            <span className="font-pixel text-[7px] text-accent-blue uppercase tracking-wider">
+              Why: {gate.reason}
+            </span>
+          </div>
+        )}
+
         <p className="font-pixel text-[8px] text-wood-dark leading-snug">
           {gate.question}
         </p>

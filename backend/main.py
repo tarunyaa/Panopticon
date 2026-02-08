@@ -19,7 +19,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .events import event_bus, gate_store, GateResponse
+from .events import event_bus, gate_store, GateResponse, GatingMode
 from .crew import run_crew
 from .tools import get_available_tools, TOOL_REGISTRY
 from .planner import plan_team
@@ -53,6 +53,7 @@ app.add_middleware(
 
 class RunRequest(BaseModel):
     prompt: str
+    mode: str = "BALANCED"  # "STRICT" | "BALANCED" | "AUTO"
 
 
 class RunResponse(BaseModel):
@@ -114,11 +115,15 @@ def plan_team_endpoint(req: PlanTeamRequest):
 
 @app.post("/run", response_model=RunResponse)
 async def start_run(req: RunRequest):
+    # Validate gating mode
+    if req.mode not in ("STRICT", "BALANCED", "AUTO"):
+        raise HTTPException(status_code=400, detail="mode must be 'STRICT', 'BALANCED', or 'AUTO'")
+
     run_id = str(uuid.uuid4())
     event_bus.create_run(run_id)
 
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(executor, run_crew, run_id, req.prompt)
+    loop.run_in_executor(executor, run_crew, run_id, req.prompt, req.mode)
 
     return RunResponse(runId=run_id)
 

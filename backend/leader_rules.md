@@ -49,12 +49,13 @@ Hard cap: **4 agents**.
 
 ### Rules
 - Ask **one question at a time**
+- Ask **at least 4 questions** to gather sufficient context about the team's domain and capabilities
 - Ask **at most 8 questions total**
-- **Each question can be a around 2-4 sentences
+- **Each question can be around 2-4 sentences**
 - Keep questions **short and focused**
 - Each question must build on the previous answer
 - Ask only what is necessary to design the team
-- Stop early if confident
+- You may stop after 4 questions if you have all the information needed, but you must ask at least 4
 
 ### High-Signal Questions (pick the most relevant)
 Focus on understanding the **team's domain and capabilities**, not a specific task:

@@ -1,0 +1,26 @@
+# Optimized Delegation Plan for Research Template
+# Primary Researcher and Critical Analyst run in PARALLEL
+# Report Synthesizer waits for BOTH
+
+tasks:
+  # PARALLEL PHASE - Both start immediately
+  - task_key: primary_researcher_task
+    async_execution: true
+    dependencies: []
+    # Gathers authoritative data independently
+
+  - task_key: critical_analyst_task
+    async_execution: true
+    dependencies: []
+    # Analyzes perspectives and biases independently
+
+  # SYNTHESIS PHASE - Waits for both parallel tasks
+  - task_key: report_synthesizer_task
+    async_execution: false
+    dependencies: [primary_researcher_task, critical_analyst_task]
+    # Needs research data AND critical analysis
+
+# Performance:
+# Time: max(primary_research, critical_analysis) + synthesis
+# vs Sequential: primary_research + critical_analysis + synthesis
+# Savings: One full task duration (~33% faster)

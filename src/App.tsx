@@ -159,7 +159,7 @@ export default function App() {
 
       {/* Main view — sidebar slides in */}
       {step === "main" && (
-        <div className="absolute right-0 top-0 h-full">
+        <div className="absolute left-0 top-0 h-full">
           <Sidebar />
         </div>
       )}

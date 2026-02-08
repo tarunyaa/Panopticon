@@ -1,6 +1,17 @@
 {
-  "HOUSE": { "x": 3840, "y": 672, "label": "House" },
-  "WORKSHOP": { "x": 2816, "y": 1632, "label": "Workshop" },
+  "HOUSE": { "x": 3488, "y": 1056, "label": "House" },
+  "WORKSHOP": {
+    "x": 2464,
+    "y": 1504,
+    "label": "Workshop",
+    "options": [
+      { "x": 2464, "y": 1504 },
+      { "x": 2464, "y": 1632 },
+      { "x": 2880, "y": 1632 },
+      { "x": 2880, "y": 1504 }
+    ]
+  },
   "CAFE": { "x": 2528, "y": 800, "label": "Cafe" },
-  "PARK": { "x": 2912, "y": 1056, "label": "Park" }
+  "PARK": { "x": 2912, "y": 1056, "label": "Park" },
+  "DORM": { "x": 3840, "y": 1600, "label": "Dorm" }
 }

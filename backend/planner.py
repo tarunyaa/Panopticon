@@ -13,6 +13,7 @@ from crewai.tools import BaseTool
 from pydantic import Field
 
 
+
 _dir = Path(__file__).parent
 
 # Load .env file from panopticon directory (has ANTHROPIC_API_KEY)
@@ -58,14 +59,83 @@ class AskQuestionTool(BaseTool):
         )
 
 
+class CreateDelegationPlanTool(BaseTool):
+    """Tool for the Leader to output a task delegation plan for execution."""
+
+    name: str = "create_delegation_plan"
+    description: str = (
+        "Generate a delegation plan that specifies which tasks to run, their execution order, "
+        "and parallelization strategy. Output valid YAML with the delegation plan structure. "
+        "Use 2-space indentation, NO tabs."
+    )
+
+    plan_path: str = Field(default=str(_dir / "delegation_plan.yaml"))
+
+    def _run(self, yaml_content: str) -> str:
+        """Parse and write the delegation plan to disk.
+
+        Args:
+            yaml_content: YAML string with delegation plan structure
+
+        Returns:
+            Success message or error details
+        """
+        try:
+            plan = yaml.safe_load(yaml_content)
+
+            if not isinstance(plan, dict):
+                return f"Error: delegation plan must be a dictionary, got {type(plan)}"
+
+            # Validate structure
+            if "tasks" not in plan:
+                return "Error: delegation plan must have 'tasks' key"
+
+            tasks = plan["tasks"]
+            if not isinstance(tasks, list):
+                return "Error: 'tasks' must be a list"
+
+            # Validate each task entry
+            for i, task in enumerate(tasks):
+                if not isinstance(task, dict):
+                    return f"Error: task[{i}] must be a dictionary"
+
+                if "task_key" not in task:
+                    return f"Error: task[{i}] missing 'task_key'"
+
+                if "async_execution" not in task:
+                    return f"Error: task[{i}] missing 'async_execution'"
+
+                if "dependencies" not in task:
+                    return f"Error: task[{i}] missing 'dependencies'"
+
+                if not isinstance(task["dependencies"], list):
+                    return f"Error: task[{i}] 'dependencies' must be a list"
+
+            # Write plan to file
+            with open(self.plan_path, "w") as f:
+                yaml.dump(plan, f, sort_keys=False, default_flow_style=False)
+
+            return (
+                f"SUCCESS: Delegation plan created with {len(tasks)} tasks. "
+                f"Plan saved and ready for execution."
+            )
+
+        except yaml.YAMLError as e:
+            return f"Error parsing YAML: {e}"
+        except Exception as e:
+            return f"Error creating delegation plan: {e}"
+
+
 class CreateTeamFilesTool(BaseTool):
     """Tool for the Leader to output the final agents.yaml and tasks.yaml files."""
 
     name: str = "create_team_files"
     description: str = (
-        "Generate the final team configuration by outputting agents.yaml and tasks.yaml content. "
-        "Input should be a YAML string containing both files separated by '---'. "
-        "The first document should be agents.yaml, the second should be tasks.yaml."
+        "Generate the final team configuration by outputting valid YAML content. "
+        "CRITICAL: Output must be TWO YAML documents separated by '---'. "
+        "First document: agents.yaml, Second document: tasks.yaml. "
+        "Use 2-space indentation, quote strings with special characters, NO tabs. "
+        "Follow the exact format shown in your instructions."
     )
 
     agents_path: str = Field(default=str(_dir / "agents.yaml"))
@@ -213,7 +283,7 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
             goal="Interview the user and design an optimal 3-4 agent team for a specific domain",
             backstory=leader_backstory,
             tools=[ask_tool, create_tool],
-            llm=LLM(model="gpt-4o", api_key=os.environ.get("OPENAI_API_KEY")),
+            llm=LLM(model="claude-sonnet-4-5-20250929", api_key=os.environ.get("ANTHROPIC_API_KEY")),
             verbose=True,
             allow_delegation=False,
         )
@@ -337,4 +407,125 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
         return {
             "type": "error",
             "message": f"Planning error: {str(e)}"
+        }
+
+
+# ============================================================================
+# Delegation Planning Function
+# ============================================================================
+
+
+def plan_task_delegation(task_prompt: str) -> dict:
+    """Let the Leader analyze a specific task and create a delegation plan.
+
+    Args:
+        task_prompt: The specific task the user wants the team to execute
+
+    Returns:
+        {"type": "plan", "plan": {...}}  - if Leader creates delegation plan
+        {"type": "error", "message": "..."}  - if something goes wrong
+    """
+    try:
+        # Load delegation rules
+        delegation_rules_path = _dir / "delegation_rules.md"
+        delegation_rules = ""
+        if delegation_rules_path.exists():
+            with open(delegation_rules_path, "r", encoding="utf-8") as f:
+                delegation_rules = f.read()
+
+        # Load current team configuration
+        agents_path = _dir / "agents.yaml"
+        tasks_path = _dir / "tasks.yaml"
+
+        if not agents_path.exists() or not tasks_path.exists():
+            return {
+                "type": "error",
+                "message": "Team configuration not found. Please create a team first."
+            }
+
+        with open(agents_path, "r") as f:
+            agents_config = yaml.safe_load(f)
+
+        with open(tasks_path, "r") as f:
+            tasks_config = yaml.safe_load(f)
+
+        # Build context with team info and task
+        team_context = "## Available Team\n\n### Agents:\n"
+        for agent_key, agent_data in agents_config.items():
+            team_context += f"\n**{agent_key}**:\n"
+            team_context += f"- Role: {agent_data['role']}\n"
+            team_context += f"- Goal: {agent_data['goal']}\n"
+
+        team_context += "\n### Task Templates:\n"
+        for task_key, task_data in tasks_config.items():
+            team_context += f"\n**{task_key}**:\n"
+            team_context += f"- Agent: {task_data['agent']}\n"
+            team_context += f"- Description: {task_data['description']}\n"
+
+        # Create Leader agent with delegation planning capability
+        leader = Agent(
+            role="Task Delegation Planner",
+            goal="Analyze the specific task and create an optimal delegation plan",
+            backstory=f"{delegation_rules}\n\n## Your Task\n\nAnalyze the user's specific task and determine:\n1. Which task templates are needed\n2. Which tasks can run in parallel\n3. Which tasks have dependencies\n\n{team_context}",
+            tools=[CreateDelegationPlanTool()],
+            llm=LLM(model="claude-sonnet-4-5-20250929", api_key=os.environ.get("ANTHROPIC_API_KEY")),
+            verbose=True,
+            allow_delegation=False,
+        )
+
+        # Create planning task
+        planning_task = Task(
+            description=(
+                f"User's specific task: {task_prompt}\n\n"
+                f"Create a delegation plan that specifies:\n"
+                f"1. Which task templates to execute (select from available templates)\n"
+                f"2. Execution order based on dependencies\n"
+                f"3. Which tasks must wait for others (use dependencies field)\n\n"
+                f"CRITICAL RULES:\n"
+                f"- ALL tasks MUST have async_execution=false (required due to CrewAI bug)\n"
+                f"- Use dependencies field to control execution order\n"
+                f"- Tasks with NO dependencies will run first\n"
+                f"- Tasks with dependencies will wait for those tasks to complete\n\n"
+                f"Use the create_delegation_plan tool to output your plan."
+            ),
+            expected_output=(
+                "Success message confirming the delegation plan was created"
+            ),
+            agent=leader,
+        )
+
+        # Store file paths
+        plan_path = _dir / "delegation_plan.yaml"
+        plan_mtime_before = plan_path.stat().st_mtime if plan_path.exists() else 0
+
+        # Run the planning crew
+        crew = Crew(
+            agents=[leader],
+            tasks=[planning_task],
+            process=Process.sequential,
+            verbose=True,
+            planning=False,
+        )
+
+        result = crew.kickoff()
+
+        # Check if plan was created
+        plan_mtime_after = plan_path.stat().st_mtime if plan_path.exists() else 0
+
+        if plan_mtime_after > plan_mtime_before:
+            # Plan was created - load and return it
+            with open(plan_path, "r") as f:
+                plan = yaml.safe_load(f)
+
+            return {"type": "plan", "plan": plan}
+        else:
+            return {
+                "type": "error",
+                "message": "Leader did not create a delegation plan"
+            }
+
+    except Exception as e:
+        return {
+            "type": "error",
+            "message": f"Delegation planning error: {str(e)}"
         }

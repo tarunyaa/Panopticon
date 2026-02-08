@@ -10,17 +10,41 @@ from crewai import Agent, Crew, Process, Task, LLM
 # Load .env from panopticon dir (has ANTHROPIC_API_KEY)
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "panopticon", ".env"))
 
-from .events import (
-    event_bus,
-    gate_store,
-    AgentIntentEvent,
-    TaskSummaryEvent,
-    GateRequestedEvent,
-    RunStartedEvent,
-    RunFinishedEvent,
-    ErrorEvent,
-)
-from .tools import instantiate_tools
+try:
+    from .events import (
+        event_bus,
+        gate_store,
+        AgentIntentEvent,
+        TaskSummaryEvent,
+        GateRequestedEvent,
+        RunStartedEvent,
+        RunFinishedEvent,
+        ErrorEvent,
+        TaskHandoffEvent,
+        GatingMode,
+    )
+    from .tools import instantiate_tools
+    from .planner import plan_task_delegation
+    from .gate_policy import should_gate_task_complete
+    from .activity_callbacks import ActivityTracker
+except ImportError:
+    # Running as standalone script
+    from events import (
+        event_bus,
+        gate_store,
+        AgentIntentEvent,
+        TaskSummaryEvent,
+        GateRequestedEvent,
+        RunStartedEvent,
+        RunFinishedEvent,
+        ErrorEvent,
+        TaskHandoffEvent,
+        GatingMode,
+    )
+    from tools import instantiate_tools
+    from planner import plan_task_delegation
+    from gate_policy import should_gate_task_complete
+    from activity_callbacks import ActivityTracker
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -91,37 +115,47 @@ def _summarize_task_output(text: str) -> str:
     return summary
 
 
-def _make_intent_step_callback(run_id: str, agent_name: str, role: str):
-    """Emit a single AGENT_INTENT the first time the agent takes a step,
-    then go silent.  This way the intent fires when the agent *actually*
-    starts working rather than all-at-once upfront."""
-    fired = {"done": False}
+def _make_combined_task_callback(
+    run_id: str,
+    agent_name: str,
+    role: str,
+    source_agents: list,
+    task_index: int,
+    total_tasks: int,
+    tasks_list: list,
+    mode: GatingMode,
+):
+    """Combined callback that emits handoff event on start and handles task completion."""
+    state = {"started": False}
 
-    def callback(step_output):
-        if not fired["done"]:
-            fired["done"] = True
+    def callback(task_output):
+        # On first execution, emit handoff and intent events
+        if not state["started"]:
+            state["started"] = True
+
+            # If this task has dependencies, emit handoff event
+            if source_agents and len(source_agents) > 0:
+                source_names = ", ".join(source_agents)
+                event_bus.emit(
+                    run_id,
+                    TaskHandoffEvent(
+                        receivingAgent=agent_name,
+                        sourceAgents=source_agents,
+                        summary=f"Receiving outputs from {source_names}",
+                    ),
+                )
+
+            # Emit intent event
             event_bus.emit(
                 run_id,
                 AgentIntentEvent(
                     agentName=agent_name,
-                    zone="WORKSHOP",  # Agent is actively working
+                    zone="WORKSHOP",
                     message=f"Started working as {role.strip().lower()}.",
                 ),
             )
 
-    return callback
-
-
-def _make_task_callback(
-    run_id: str,
-    agent_name: str,
-    task_index: int,
-    total_tasks: int,
-    tasks_list: list,
-):
-    """Emit a TASK_SUMMARY when the agent's task finishes, then gate."""
-
-    def callback(task_output):
+        # Handle task completion
         cleaned = _clean_crewai_output(str(task_output))
         summary = _summarize_task_output(cleaned)
         event_bus.emit(
@@ -133,21 +167,35 @@ def _make_task_callback(
             ),
         )
 
-        # Skip gate on last task — nothing left to approve
         is_last = task_index == total_tasks - 1
-        if is_last:
+
+        # Check gate policy
+        should_gate, reason = should_gate_task_complete(
+            mode=mode,
+            is_last_task=is_last,
+            leader_recommended=False,  # TODO: Implement leader recommendation detection
+        )
+
+        if not should_gate:
             return
 
         # Create gate and block until user responds
         gate_id, gate_event = gate_store.create_gate(run_id)
+
+        question = f"{agent_name} finished their task. Continue?"
+        if is_last:
+            question = "Final deliverable ready. Approve?"
+
         event_bus.emit(
             run_id,
             GateRequestedEvent(
                 gateId=gate_id,
                 runId=run_id,
                 agentName=agent_name,
-                question=f"{agent_name} finished their task. Continue to the next task?",
+                question=question,
                 context=summary,
+                reason=reason,
+                gateSource="task_complete",
             ),
         )
 
@@ -167,8 +215,14 @@ def _make_task_callback(
     return callback
 
 
-def run_crew(run_id: str, prompt: str) -> str:
-    """Build and run the crew, emitting events along the way."""
+def run_crew(run_id: str, prompt: str, mode: GatingMode = "BALANCED") -> str:
+    """Build and run the crew, emitting events along the way.
+
+    Args:
+        run_id: Unique identifier for this run
+        prompt: User's task prompt
+        mode: Gating mode (STRICT, BALANCED, AUTO)
+    """
 
     # Read YAML fresh each run so newly-created agents are picked up
     with open(os.path.join(_dir, "agents.yaml"), "r") as f:
@@ -187,6 +241,18 @@ def run_crew(run_id: str, prompt: str) -> str:
     event_bus.emit(run_id, RunStartedEvent(runId=run_id, prompt=prompt))
 
     try:
+        # Step 1: Get delegation plan from Leader
+        delegation_result = plan_task_delegation(prompt)
+
+        if delegation_result["type"] == "error":
+            raise ValueError(f"Delegation planning failed: {delegation_result['message']}")
+
+        delegation_plan = delegation_result["plan"]
+        planned_tasks = delegation_plan.get("tasks", [])
+
+        if not planned_tasks:
+            raise ValueError("Delegation plan has no tasks")
+
         # Identify the Leader agent (role contains "Leader")
         leader_key = None
         for key, config in agents_config.items():
@@ -214,17 +280,18 @@ def run_crew(run_id: str, prompt: str) -> str:
             if is_leader and delegation_rules:
                 backstory += f"\n\n## EXECUTION MODE - DELEGATION PROTOCOL\n\n{delegation_rules}"
 
+            # Create activity tracker for this agent
+            activity_tracker = ActivityTracker(run_id, agent_name)
+
             agent = Agent(
                 role=config["role"].strip(),
                 goal=config["goal"].strip(),
                 backstory=backstory,
                 verbose=True,
-                llm=LLM(model="gpt-4o", api_key=os.environ.get("OPENAI_API_KEY")),
+                llm=LLM(model="claude-sonnet-4-5-20250929", api_key=os.environ.get("ANTHROPIC_API_KEY")),
                 tools=agent_tools,
                 allow_delegation=is_leader,  # Only Leader can delegate
-                step_callback=_make_intent_step_callback(
-                    run_id, agent_name, config["role"]
-                ),
+                callbacks=[activity_tracker],
             )
 
             agents[key] = agent
@@ -234,38 +301,68 @@ def run_crew(run_id: str, prompt: str) -> str:
             else:
                 worker_agents.append(agent)
 
-        # Build tasks only for worker agents (not the Leader/manager)
-        task_items = [
-            (key, config) for key, config in tasks_config.items()
-            if config["agent"] != leader_key
-        ]
-        total_tasks = len(task_items)
+        # Build tasks based on delegation plan
         tasks = []
+        task_map = {}  # Map task_key -> Task object for building context
+        task_agent_map = {}  # Map task_key -> agent_name for tracking dependencies
+        total_tasks = len(planned_tasks)
 
-        for i, (key, config) in enumerate(task_items):
+        for i, plan_entry in enumerate(planned_tasks):
+            task_key = plan_entry["task_key"]
+            async_execution = plan_entry.get("async_execution", False)
+            dependencies = plan_entry.get("dependencies", [])
+
+            # Get task config from tasks.yaml
+            if task_key not in tasks_config:
+                raise ValueError(f"Task '{task_key}' in delegation plan not found in tasks.yaml")
+
+            config = tasks_config[task_key]
             agent_key = config["agent"]
+
+            if agent_key == leader_key:
+                # Skip Leader's task
+                continue
+
             agent_name = agent_key.replace("_", " ").title()
-            agent_config = agents_config.get(agent_key, {})
 
             desc = config["description"].strip()
             if "{prompt}" not in desc:
                 desc += "\n\nUser's request: {prompt}"
 
-            is_last = (i == len(task_items) - 1)
+            # Build context from dependencies and track source agents
+            context_tasks = []
+            source_agents = []
+            for dep_key in dependencies:
+                if dep_key in task_map:
+                    context_tasks.append(task_map[dep_key])
+                    # Track which agent owns this dependency task
+                    if dep_key in task_agent_map:
+                        source_agents.append(task_agent_map[dep_key])
+
+            # Create combined callback that handles both handoff and task completion
+            combined_callback = _make_combined_task_callback(
+                run_id=run_id,
+                agent_name=agent_name,
+                role=agents_config[agent_key]["role"],
+                source_agents=source_agents,
+                task_index=i,
+                total_tasks=total_tasks,
+                tasks_list=tasks,
+                mode=mode,
+            )
+
             task = Task(
                 description=desc.format(prompt=prompt),
                 expected_output=config["expected_output"].strip(),
                 agent=agents[agent_key],
-                callback=_make_task_callback(
-                    run_id, agent_name,
-                    task_index=i,
-                    total_tasks=total_tasks,
-                    tasks_list=tasks,
-                ),
-                async_execution=not is_last,
-                **({"context": list(tasks)} if is_last else {}),
+                callback=combined_callback,
+                async_execution=async_execution,  # From delegation plan
+                context=context_tasks if context_tasks else None,
             )
+
             tasks.append(task)
+            task_map[task_key] = task
+            task_agent_map[task_key] = agent_name
 
         # Use the Leader agent as the manager for hierarchical delegation
         crew = Crew(

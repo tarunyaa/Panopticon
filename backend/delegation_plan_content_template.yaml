@@ -1,0 +1,27 @@
+# Optimized Delegation Plan for Content Template
+# Topic Researcher and Content Strategist run in PARALLEL
+# Senior Writer waits for BOTH before starting
+
+tasks:
+  # PARALLEL TASKS - Both start immediately
+  - task_key: topic_researcher_task
+    async_execution: true
+    dependencies: []
+    # Gathers factual material independently
+
+  - task_key: content_strategist_task
+    async_execution: true
+    dependencies: []
+    # Designs content structure independently
+
+  # FINAL TASK - Waits for both parallel tasks
+  - task_key: senior_writer_task
+    async_execution: false
+    dependencies: [topic_researcher_task, content_strategist_task]
+    # Needs research findings AND content strategy
+
+# Performance:
+# - Researcher and Strategist work simultaneously (50% time savings)
+# - Writer has both inputs ready when they start
+# - Total time: max(research_time, strategy_time) + writing_time
+# - Instead of: research_time + strategy_time + writing_time

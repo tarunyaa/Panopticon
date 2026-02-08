@@ -1,0 +1,41 @@
+{
+  "name": "renewable-energy-benefits-api",
+  "version": "1.0.0",
+  "description": "RESTful API for renewable energy benefits information system",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node scripts/seedDatabase.js",
+    "test": "jest --coverage"
+  },
+  "keywords": [
+    "renewable-energy",
+    "api",
+    "rest",
+    "express",
+    "mongodb"
+  ],
+  "author": "Backend Developer",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^7.5.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "express-rate-limit": "^6.10.0",
+    "express-validator": "^7.0.1",
+    "morgan": "^1.10.0",
+    "compression": "^1.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.6.4",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}

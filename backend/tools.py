@@ -77,31 +77,54 @@ class SandboxedShellTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# Safe wrappers for external tools (always return a tool_result)
+# Safe wrappers for external tools (always return a STRING tool_result)
 # ---------------------------------------------------------------------------
+
+import json
 
 
 class SafeSerperDevTool(SerperDevTool):
     def _run(self, *args, **kwargs):  # type: ignore[override]
+        print(f"[TOOL CALL] web_search | args={args} | kwargs={kwargs}")
         try:
-            return super()._run(*args, **kwargs)
+            out = super()._run(*args, **kwargs)
+            print(f"[TOOL OUT TYPE] web_search | type={type(out)} | is_str={isinstance(out, str)}")
+            # Ensure output is always a string
+            if isinstance(out, str):
+                return out
+            return json.dumps(out, ensure_ascii=False, indent=2)
         except Exception as e:
+            print(f"[TOOL ERROR] web_search | {e}")
             return f"Tool error (web_search): {e}"
 
 
 class SafeScrapeWebsiteTool(ScrapeWebsiteTool):
     def _run(self, *args, **kwargs):  # type: ignore[override]
+        print(f"[TOOL CALL] web_scraper | args={args} | kwargs={kwargs}")
         try:
-            return super()._run(*args, **kwargs)
+            out = super()._run(*args, **kwargs)
+            print(f"[TOOL OUT TYPE] web_scraper | type={type(out)} | is_str={isinstance(out, str)}")
+            # Ensure output is always a string
+            if isinstance(out, str):
+                return out
+            return json.dumps(out, ensure_ascii=False, indent=2)
         except Exception as e:
+            print(f"[TOOL ERROR] web_scraper | {e}")
             return f"Tool error (web_scraper): {e}"
 
 
 class SafeFileWriterTool(FileWriterTool):
     def _run(self, *args, **kwargs):  # type: ignore[override]
+        print(f"[TOOL CALL] file_writer | args={args} | kwargs={kwargs}")
         try:
-            return super()._run(*args, **kwargs)
+            out = super()._run(*args, **kwargs)
+            print(f"[TOOL OUT TYPE] file_writer | type={type(out)} | is_str={isinstance(out, str)}")
+            # Ensure output is always a string
+            if isinstance(out, str):
+                return out
+            return json.dumps(out, ensure_ascii=False, indent=2)
         except Exception as e:
+            print(f"[TOOL ERROR] file_writer | {e}")
             return f"Tool error (file_writer): {e}"
 
 

@@ -48,7 +48,6 @@ export function TeamPlanScreen({
   const [userInput, setUserInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [showTemplates, setShowTemplates] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Review phase - agent editing
@@ -149,7 +148,6 @@ export function TeamPlanScreen({
     const assigned = assignAvatars(template.agents);
     onAgents(assigned);
     setPhase("review");
-    setShowTemplates(false);
   };
 
   // Review phase handlers
@@ -209,12 +207,11 @@ export function TeamPlanScreen({
   if (phase === "input") {
     return (
       <div className="onboarding-overlay">
-        <div className="flex gap-4 max-w-2xl w-full px-4">
-          {showTemplates && (
-            <div className="w-[160px] flex-shrink-0 pixel-panel p-4">
-              <TemplatesSidebar onApply={handleApplyTemplate} />
-            </div>
-          )}
+        <div className="flex gap-4 max-w-3xl w-full px-4">
+          {/* Templates sidebar - always visible */}
+          <div className="w-[160px] flex-shrink-0 pixel-panel p-4">
+            <TemplatesSidebar onApply={handleApplyTemplate} />
+          </div>
 
           <div className="flex-1 pixel-panel p-6 flex flex-col gap-4">
             <h2 className="font-pixel text-[10px] text-ink tracking-widest uppercase text-center">
@@ -273,12 +270,9 @@ export function TeamPlanScreen({
               >
                 Plan My Team
               </button>
-              <button
-                className="font-pixel text-[8px] text-wood underline hover:text-ink"
-                onClick={() => setShowTemplates((v) => !v)}
-              >
-                {showTemplates ? "Hide templates" : "Or pick a template"}
-              </button>
+              <span className="font-pixel text-[8px] text-wood text-center">
+                Or select a template from the left
+              </span>
             </div>
           </div>
         </div>

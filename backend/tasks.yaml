@@ -1,35 +1,29 @@
-eddy_task:
+carlos_task:
   description: Coordinate team members and ensure objectives are met.
   expected_output: Successful team coordination and project completion.
-  agent: eddy
-abigail_task:
-  description: 'Research and gather information for: {prompt}. Find credible sources,
-    recent developments, key concepts, and real-world examples that will help students
-    understand the topic. Identify analogies and explanations that make technical
-    concepts accessible.'
-  expected_output: 'A structured research document containing: (1) 5-8 key facts or
-    concepts with source citations, (2) 2-3 real-world examples or case studies, (3)
-    simplified explanations of technical terms, (4) relevant statistics or recent
-    developments, and (5) suggested analogies for complex concepts.'
-  agent: abigail
-carlos_task:
-  description: 'Write an educational blog post for: {prompt}. Use the research provided
-    to create engaging, student-friendly content that explains semiconductor concepts
-    clearly. Include an attention-grabbing introduction, well-organized body sections,
-    practical examples, and a strong conclusion.'
-  expected_output: 'A complete blog post (800-1200 words) with: (1) compelling headline,
-    (2) engaging introduction that establishes relevance for students, (3) 3-5 main
-    sections with clear subheadings, (4) accessible explanations of technical concepts
-    using analogies, (5) real-world examples and applications, (6) conclusion that
-    reinforces key takeaways, and (7) properly formatted text ready for publication.'
   agent: carlos
+abigail_task:
+  description: 'Research the following topic thoroughly. Gather key facts, statistics
+    with sources, expert quotes or perspectives, real-world examples, current trends,
+    and any competing viewpoints that should be addressed: {prompt}'
+  expected_output: A research brief with organized facts grouped by subtopic, statistics
+    with source citations, notable quotes or perspectives, concrete examples, and
+    a summary of current trends and debates.
+  agent: abigail
 isabella_task:
-  description: 'Review and edit the blog post for: {prompt}. Verify factual accuracy,
-    improve clarity and readability for student audiences, check structure and flow,
-    ensure consistent tone, and confirm all technical concepts are explained appropriately.'
-  expected_output: 'A polished final blog post with: (1) verified factual accuracy,
-    (2) clear, student-appropriate language throughout, (3) smooth transitions and
-    logical flow, (4) corrected grammar and spelling, (5) consistent formatting, (6)
-    editorial notes documenting major changes made, and (7) confirmation that content
-    meets educational standards for the target audience.'
+  description: 'Analyze the target audience and design the content approach for the
+    following request. Define the angle, outline the structure with section descriptions,
+    identify key messages, set tone guidelines, and suggest SEO keywords: {prompt}'
+  expected_output: A content strategy with target audience profile, chosen angle with
+    rationale, detailed outline with section-by-section descriptions, key messages
+    to convey, tone and style guidelines, and target SEO keywords.
   agent: isabella
+klaus_task:
+  description: 'Using the research findings and content strategy from your teammates,
+    write the final polished piece for the following request. Weave in facts and examples
+    from the research, follow the structure and tone from the strategy, and ensure
+    a compelling narrative throughout: {prompt}'
+  expected_output: Complete, publication-ready content with proper formatting, facts
+    and examples woven into the narrative, citations where appropriate, and a compelling
+    arc from introduction to conclusion.
+  agent: klaus

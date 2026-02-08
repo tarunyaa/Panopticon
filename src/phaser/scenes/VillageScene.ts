@@ -4,7 +4,7 @@ import type { AgentDef } from "../registry/AgentRegistry";
 import { updateMovement } from "../systems/movement";
 import { wsClient } from "../../ws/client";
 import { API_BASE } from "../../config";
-import type { AgentIntentEvent, WSEvent } from "../../types/events";
+import type { AgentIntentEvent, AgentActivityEvent, WSEvent } from "../../types/events";
 import type { AgentInfo } from "../../types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "../../types/agents";
 
@@ -125,6 +125,7 @@ export class VillageScene extends Phaser.Scene {
     // Listen for batch spawn from onboarding flow
     const spawnAgentsHandler = (defs: AgentDef[]) => {
       this.agentRegistry.spawn(defs);
+      this.agentRegistry.setupTooltips();
     };
     this.game.events.on("spawn-agents", spawnAgentsHandler);
 
@@ -132,6 +133,7 @@ export class VillageScene extends Phaser.Scene {
     const agentCreatedHandler = (agent: AgentInfo, index: number) => {
       const def = agentInfoToDef(agent, index);
       this.agentRegistry.spawnOne(def);
+      this.agentRegistry.setupTooltips();
     };
     this.game.events.on("agent-created", agentCreatedHandler);
 
@@ -168,14 +170,44 @@ export class VillageScene extends Phaser.Scene {
       if (ev.type === "RUN_STARTED") {
         // Gather all agents at CAFE to discuss the incoming task
         this.agentRegistry.moveAllToZone("CAFE");
+      } else if (ev.type === "TASK_HANDOFF") {
+        // Dependency handoff - agents meet at CAFE
+        // Move receiving agent to CAFE
+        this.agentRegistry.setTarget(ev.receivingAgent, "CAFE");
+
+        // Move all source agents to CAFE and show handoff bubbles
+        ev.sourceAgents.forEach((sourceAgent, index) => {
+          this.agentRegistry.setTarget(sourceAgent, "CAFE");
+          // Stagger the bubbles slightly so they don't all appear at once
+          this.time.delayedCall(200 * index, () => {
+            this.agentRegistry.showBubble(
+              sourceAgent,
+              `Handing off to ${ev.receivingAgent}`,
+              150
+            );
+          });
+        });
+
+        // Show receiving bubble after sources
+        this.time.delayedCall(200 * ev.sourceAgents.length + 100, () => {
+          const sources = ev.sourceAgents.join(", ");
+          this.agentRegistry.showBubble(
+            ev.receivingAgent,
+            `Receiving from ${sources}`,
+            150
+          );
+        });
       } else if (ev.type === "TASK_SUMMARY") {
         this.agentRegistry.setTarget(ev.agentName, "HOUSE");
         this.agentRegistry.setProgress(ev.agentName, 1);
       } else if (ev.type === "GATE_REQUESTED") {
         this.agentRegistry.setTarget(ev.agentName, "HOUSE");
       } else if (ev.type === "RUN_FINISHED") {
-        // All done — agents return to PARK
-        this.agentRegistry.moveAllToZone("PARK");
+        // All done — agents return to DORM (idle)
+        this.agentRegistry.moveAllToZone("DORM");
+      } else if (ev.type === "AGENT_ACTIVITY") {
+        // Update agent activity state
+        this.agentRegistry.setActivity(ev.agentName, ev.activity, ev.details);
       }
     };
     wsClient.on("event", eventHandler);
@@ -198,6 +230,7 @@ export class VillageScene extends Phaser.Scene {
     updateMovement(this.agentRegistry);
     this.agentRegistry.tickProgress();
     this.agentRegistry.tickBubbles();
+    this.agentRegistry.tickActivityIcons();
 
     // Arrow-key panning
     const panSpeed = 8;

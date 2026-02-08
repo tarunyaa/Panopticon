@@ -1,0 +1,33 @@
+# Optimized Delegation Plan for Development Template
+# Requirements Analyst and Technical Researcher run in PARALLEL
+# System Designer waits for BOTH
+# Lead Developer waits for System Designer
+
+tasks:
+  # PARALLEL PHASE - Both start immediately
+  - task_key: requirements_analyst_task
+    async_execution: true
+    dependencies: []
+    # Analyzes user requirements independently
+
+  - task_key: technical_researcher_task
+    async_execution: true
+    dependencies: []
+    # Researches technology stack independently
+
+  # DESIGN PHASE - Waits for both parallel tasks
+  - task_key: system_designer_task
+    async_execution: false
+    dependencies: [requirements_analyst_task, technical_researcher_task]
+    # Needs requirements AND tech stack to design architecture
+
+  # IMPLEMENTATION PHASE - Waits for design
+  - task_key: lead_developer_task
+    async_execution: false
+    dependencies: [system_designer_task]
+    # Needs complete architecture design to implement
+
+# Performance:
+# Time: max(requirements, tech_research) + design + development
+# vs Sequential: requirements + tech_research + design + development
+# Savings: One full task duration (~25% faster)

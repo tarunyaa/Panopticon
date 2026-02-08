@@ -1,0 +1,46 @@
+
+> panopticon@0.1.0 dev
+> vite
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m405[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m9:01:25 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx, /src/components/EventFeed.tsx, /src/components/TaskInput.tsx, /src/components/GateModal.tsx, /src/components/onboarding/TeamPlanScreen.tsx, /src/components/onboarding/AgentFormModal.tsx[22m
+[2m9:22:36 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/onboarding/TeamPlanScreen.tsx, /src/index.css[22m
+[2m9:23:12 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/onboarding/TeamPlanScreen.tsx, /src/index.css[22m
+[2m9:23:35 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/onboarding/TeamPlanScreen.tsx, /src/index.css[22m
+[2m9:48:20 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/types/events.ts[22m
+[2m9:48:53 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m9:49:06 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m9:49:24 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m9:49:48 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m9:50:20 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m9:50:57 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m9:51:54 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m9:52:25 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:10:56 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/types/events.ts[22m
+[2m10:10:57 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/components/onboarding/TeamPlanScreen.tsx, /src/components/onboarding/TemplatesSidebar.tsx[22m
+[2m10:11:31 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:11:59 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/types/events.ts[22m
+[2m10:12:03 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/types/events.ts[22m
+[2m10:12:27 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/TaskInput.tsx, /src/index.css[22m
+[2m10:12:29 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/TaskInput.tsx, /src/index.css[22m
+[2m10:12:32 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/TaskInput.tsx, /src/index.css[22m
+[2m10:13:00 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/components/onboarding/TeamPlanScreen.tsx, /src/components/onboarding/TemplatesSidebar.tsx[22m
+[2m10:13:41 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/components/onboarding/TeamPlanScreen.tsx, /src/components/onboarding/TemplatesSidebar.tsx[22m
+[2m10:13:56 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/GateModal.tsx, /src/index.css[22m
+[2m10:18:29 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:19:55 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:20:10 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:20:43 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:24:30 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:25:21 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:25:31 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:25:38 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:26:41 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/index.css[22m
+[2m10:35:05 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:36:02 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/types/events.ts[22m
+[2m10:36:35 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m
+[2m10:36:55 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/components/Sidebar.tsx[22m

@@ -4,6 +4,7 @@ import { API_BASE } from "../config";
 
 export function TaskInput() {
   const [prompt, setPrompt] = useState("");
+  const [mode, setMode] = useState<"STRICT" | "BALANCED" | "AUTO">("BALANCED");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +18,7 @@ export function TaskInput() {
       const res = await fetch(`${API_BASE}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
+        body: JSON.stringify({ prompt: text, mode }),
       });
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data = await res.json();
@@ -36,6 +37,27 @@ export function TaskInput() {
 
   return (
     <div className="px-3 py-2">
+      <div className="text-[8px] text-wood uppercase tracking-widest mb-1.5">
+        Gating Mode
+      </div>
+      <div className="flex gap-2 mb-2">
+        {(["STRICT", "BALANCED", "AUTO"] as const).map((m) => (
+          <label
+            key={m}
+            className="flex items-center gap-1 cursor-pointer"
+          >
+            <input
+              type="radio"
+              name="mode"
+              value={m}
+              checked={mode === m}
+              onChange={(e) => setMode(e.target.value as typeof mode)}
+              className="w-3 h-3"
+            />
+            <span className="text-[8px] text-ink font-pixel">{m}</span>
+          </label>
+        ))}
+      </div>
       <div className="text-[8px] text-wood uppercase tracking-widest mb-1.5">
         Task
       </div>

@@ -1,0 +1,12 @@
+tasks:
+- task_key: abigail_task
+  async_execution: false
+  dependencies: []
+- task_key: isabella_task
+  async_execution: false
+  dependencies: []
+- task_key: klaus_task
+  async_execution: false
+  dependencies:
+  - abigail_task
+  - isabella_task

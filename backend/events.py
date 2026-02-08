@@ -8,7 +8,8 @@ from dataclasses import dataclass, asdict
 from typing import Literal
 
 
-ZoneId = Literal["HOUSE", "WORKSHOP", "CAFE", "PARK"]
+ZoneId = Literal["HOUSE", "WORKSHOP", "CAFE", "PARK", "DORM"]
+GatingMode = Literal["STRICT", "BALANCED", "AUTO"]
 
 
 @dataclass
@@ -61,6 +62,40 @@ class GateRequestedEvent:
     agentName: str = ""
     question: str = ""
     context: str = ""
+    reason: str = ""  # Why this gate is needed
+    gateSource: str = "task_complete"  # "task_complete" | "file_operation" | "terminal_command" | "leader_request"
+
+
+@dataclass
+class GateRecommendedEvent:
+    """Leader's advisory gate recommendation (does not block execution)."""
+    type: str = "GATE_RECOMMENDED"
+    agentName: str = ""
+    reason: str = ""
+    context: str = ""
+    question: str = ""
+    options: str = ""  # JSON-encoded list of options
+    recommendation: str = ""
+
+
+@dataclass
+class AgentActivityEvent:
+    type: str = "AGENT_ACTIVITY"
+    agentName: str = ""
+    activity: str = "idle"  # "idle" | "tool_call" | "llm_generating"
+    details: str = ""  # tool name or current task description
+
+
+@dataclass
+class TaskHandoffEvent:
+    type: str = "TASK_HANDOFF"
+    receivingAgent: str = ""
+    sourceAgents: list = None  # List of agent names whose outputs are being used
+    summary: str = ""  # Brief description of what's being handed off
+
+    def __post_init__(self):
+        if self.sourceAgents is None:
+            self.sourceAgents = []
 
 
 @dataclass
