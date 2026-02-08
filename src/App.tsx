@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { LoginScreen } from "./components/onboarding/LoginScreen";
 import { AvatarSelectScreen } from "./components/onboarding/AvatarSelectScreen";
 import { TeamPlanScreen } from "./components/onboarding/TeamPlanScreen";
+import { RightSidebar } from "./components/RightSidebar";
 import type { OnboardingAgent } from "./types/onboarding";
 import type { CreateAgentPayload } from "./types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "./types/agents";
@@ -11,6 +12,7 @@ import { API_BASE } from "./config";
 import { GateModal } from "./components/GateModal";
 import { wsClient } from "./ws/client";
 import type { GateRequestedEvent } from "./types/events";
+import type { AgentInspectData } from "./phaser/registry/AgentRegistry";
 
 type Step = "login" | "avatars" | "team" | "main";
 
@@ -28,6 +30,7 @@ export default function App() {
   const [entering, setEntering] = useState(false);
   const [enterError, setEnterError] = useState<string | null>(null);
   const [activeGate, setActiveGate] = useState<GateRequestedEvent | null>(null);
+  const [inspectData, setInspectData] = useState<AgentInspectData | null>(null);
 
   useEffect(() => {
     if (gameRef.current && !gameInstance.current) {
@@ -46,6 +49,15 @@ export default function App() {
     wsClient.on("gate", handler);
     return () => wsClient.off("gate", handler);
   }, []);
+
+  // Listen for agent inspect events from Phaser
+  useEffect(() => {
+    const game = gameInstance.current;
+    if (!game) return;
+    const handler = (data: AgentInspectData | null) => setInspectData(data);
+    game.events.on("agent-inspect", handler);
+    return () => { game.events.off("agent-inspect", handler); };
+  }, [step]); // re-attach when step changes (game may not exist until after first render)
 
   const handleEnterVillage = useCallback(async () => {
     if (!leaderAvatar) return;
@@ -110,6 +122,15 @@ export default function App() {
           };
         });
         game.events.emit("spawn-agents", agentDefs);
+
+        // Spawn user avatar at HOUSE
+        if (userAvatar) {
+          const userSprite = ALL_SPRITES.find((s) => s.path.includes(userAvatar.spriteKey));
+          game.events.emit("spawn-user", {
+            name: userAvatar.name,
+            spriteKey: userSprite?.key ?? ALL_SPRITES[0].key,
+          });
+        }
       }
 
       setStep("main");
@@ -119,7 +140,7 @@ export default function App() {
     } finally {
       setEntering(false);
     }
-  }, [leaderAvatar, agents]);
+  }, [leaderAvatar, agents, userAvatar]);
 
   return (
     <div className="h-screen w-screen relative bg-floor overflow-hidden">
@@ -162,6 +183,16 @@ export default function App() {
         <div className="absolute left-0 top-0 h-full">
           <Sidebar />
         </div>
+      )}
+
+      {/* Right sidebar — Intel panel */}
+      {step === "main" && (
+        <RightSidebar
+          inspectData={inspectData}
+          onCloseInspect={() => setInspectData(null)}
+          userName={userAvatar?.name}
+          userAvatarSrc={userAvatar ? ALL_SPRITES.find((s) => s.path.includes(userAvatar.spriteKey))?.path : undefined}
+        />
       )}
 
       {/* Gate modal — shown above everything when a gate is requested */}

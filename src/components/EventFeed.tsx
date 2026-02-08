@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { wsClient } from "../ws/client";
-import type { WSEvent, TaskSummaryEvent } from "../types/events";
+import type { WSEvent } from "../types/events";
 import type { AgentInfo } from "../types/agents";
-import { SLOT_COLORS } from "../types/agents";
+import { ALL_SPRITES } from "../types/agents";
+import { AgentAvatar } from "./shared/AgentAvatar";
+import { TaskSummaryCard } from "./shared/TaskSummaryCard";
 
 interface Props {
   agents: AgentInfo[];
@@ -96,13 +98,16 @@ export function EventFeed({ agents }: Props) {
   const [runDone, setRunDone] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const agentDotMap = useMemo(() => {
+  const agentAvatarMap = useMemo(() => {
     const map: Record<string, string> = {};
     agents.forEach((a, i) => {
+      const path = ALL_SPRITES[i % ALL_SPRITES.length].path;
       const displayName = a.id
         .replace(/_/g, " ")
         .replace(/\b\w/g, (c) => c.toUpperCase());
-      map[displayName] = SLOT_COLORS[i % SLOT_COLORS.length].bg;
+      map[displayName] = path;
+      // Also map the raw agent_id (backend leader events use it as-is)
+      map[a.id] = path;
     });
     return map;
   }, [agents]);
@@ -192,7 +197,6 @@ export function EventFeed({ agents }: Props) {
       {activeAgents.length > 0 && (
         <div className="px-3 pb-1 flex flex-wrap gap-1">
           {activeAgents.map((name) => {
-            const dot = agentDotMap[name] || "bg-wood";
             const active = filterAgent === name;
             return (
               <button
@@ -204,7 +208,7 @@ export function EventFeed({ agents }: Props) {
                     : "border-wood-light/40 text-wood-light hover:border-wood hover:text-wood"
                 }`}
               >
-                <span className={`w-1.5 h-1.5 ${dot} border border-wood-dark shrink-0`} />
+                <AgentAvatar src={agentAvatarMap[name]} size={12} />
                 {name}
               </button>
             );
@@ -231,13 +235,13 @@ export function EventFeed({ agents }: Props) {
             <ParallelGroup
               key={i}
               events={group.events}
-              agentDotMap={agentDotMap}
+              agentAvatarMap={agentAvatarMap}
             />
           ) : (
             <EventEntry
               key={i}
               tse={group.event}
-              agentDotMap={agentDotMap}
+              agentAvatarMap={agentAvatarMap}
               runStart={runStart}
             />
           )
@@ -250,10 +254,10 @@ export function EventFeed({ agents }: Props) {
 
 function ParallelGroup({
   events,
-  agentDotMap,
+  agentAvatarMap,
 }: {
   events: TimestampedEvent[];
-  agentDotMap: Record<string, string>;
+  agentAvatarMap: Record<string, string>;
 }) {
   return (
     <div className="border-l-2 border-accent-purple/40 pl-1.5 space-y-0.5">
@@ -261,7 +265,7 @@ function ParallelGroup({
         Parallel
       </div>
       {events.map((tse, i) => (
-        <EventEntry key={i} tse={tse} agentDotMap={agentDotMap} runStart={null} />
+        <EventEntry key={i} tse={tse} agentAvatarMap={agentAvatarMap} runStart={null} />
       ))}
     </div>
   );
@@ -274,11 +278,11 @@ function clip(text: string, max = 80): string {
 
 function EventEntry({
   tse,
-  agentDotMap,
+  agentAvatarMap,
   runStart,
 }: {
   tse: TimestampedEvent;
-  agentDotMap: Record<string, string>;
+  agentAvatarMap: Record<string, string>;
   runStart: number | null;
 }) {
   const event = tse.event;
@@ -294,13 +298,10 @@ function EventEntry({
         </div>
       );
 
-    case "AGENT_INTENT": {
-      const dot = agentDotMap[event.agentName] || "bg-wood";
+    case "AGENT_INTENT":
       return (
         <div className="flex items-start gap-1.5 px-1 text-[8px] text-wood">
-          <span
-            className={`w-1.5 h-1.5 mt-[3px] ${dot} border border-wood-dark shrink-0`}
-          />
+          <AgentAvatar src={agentAvatarMap[event.agentName]} size={14} />
           <span className="flex-1">
             <span className="font-bold text-ink">{event.agentName}</span>
             {" "}
@@ -309,17 +310,13 @@ function EventEntry({
           {relTime && <span className="text-[6px] text-wood-light/60 tabular-nums shrink-0">{relTime}</span>}
         </div>
       );
-    }
 
     case "AGENT_ACTIVITY": {
-      const dot = agentDotMap[event.agentName] || "bg-wood";
       if (event.activity === "tool_call") {
-        const tool = event.toolName || "tool";
+        const tool = event.details || "tool";
         return (
           <div className="flex items-start gap-1.5 px-1 ml-2 text-[7px] text-wood-light">
-            <span
-              className={`w-1 h-1 mt-[3px] ${dot} border border-wood-dark/50 shrink-0 rounded-full`}
-            />
+            <AgentAvatar src={agentAvatarMap[event.agentName]} size={10} />
             <span className="flex-1">
               <span className="text-accent-purple">{"\u2692"}</span>{" "}
               <span className="text-ink">{event.agentName}</span>{" "}
@@ -332,9 +329,7 @@ function EventEntry({
       if (event.activity === "llm_generating") {
         return (
           <div className="flex items-start gap-1.5 px-1 ml-2 text-[7px] text-wood-light/70">
-            <span
-              className={`w-1 h-1 mt-[3px] ${dot} border border-wood-dark/30 shrink-0 rounded-full`}
-            />
+            <AgentAvatar src={agentAvatarMap[event.agentName]} size={10} />
             <span>
               <span className="text-wood-light/50">{"\u2699"}</span>{" "}
               <span className="text-ink/60">{event.agentName}</span>{" "}
@@ -346,35 +341,37 @@ function EventEntry({
       return null;
     }
 
-    case "AGENT_OUTPUT": {
-      const outDot = agentDotMap[event.agentName] || "bg-wood";
+    case "AGENT_OUTPUT":
       return (
         <div className="flex items-start gap-1.5 px-1 text-[7px] text-wood-light">
-          <span
-            className={`w-1 h-1 mt-[3px] ${outDot} border border-wood-dark/50 shrink-0 rounded-full`}
-          />
+          <AgentAvatar src={agentAvatarMap[event.agentName]} size={10} />
           <span className="break-words">{clip(event.output.replace(/\n/g, " ").trim(), 100)}</span>
         </div>
       );
-    }
 
-    case "TASK_HANDOFF": {
-      const handoffDot = agentDotMap[event.receivingAgent] || "bg-wood";
+    case "TASK_HANDOFF":
       return (
         <div className="flex items-start gap-1.5 px-1 text-[7px] text-wood-light italic">
-          <span
-            className={`w-1 h-1 mt-[3px] ${handoffDot} border border-wood-dark/50 shrink-0 rounded-full`}
-          />
+          <AgentAvatar src={agentAvatarMap[event.receivingAgent]} size={10} />
           <span className="flex-1">
             {event.sourceAgents.join(", ")} {"\u2192"} <span className="font-bold text-ink not-italic">{event.receivingAgent}</span>
           </span>
           {relTime && <span className="text-[6px] text-wood-light/60 tabular-nums shrink-0 not-italic">{relTime}</span>}
         </div>
       );
-    }
 
     case "TASK_SUMMARY":
-      return <TaskSummaryEntry event={event} agentDotMap={agentDotMap} relTime={relTime} />;
+      return <TaskSummaryCard event={event} agentAvatarMap={agentAvatarMap} relTime={relTime} />;
+
+    case "FINAL_OUTPUT":
+      return (
+        <div className="pixel-inset px-2 py-1.5 text-[8px] !bg-accent-green/5 !border-accent-green/40">
+          <div className="text-accent-green uppercase tracking-widest mb-1">Final Output</div>
+          <div className="text-wood-dark text-[7px] leading-snug whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
+            {event.output}
+          </div>
+        </div>
+      );
 
     case "RUN_FINISHED":
       return (
@@ -384,18 +381,16 @@ function EventEntry({
         </div>
       );
 
-    case "GATE_REQUESTED": {
-      const gateDot = agentDotMap[event.agentName] || "bg-wood";
+    case "GATE_REQUESTED":
       return (
-        <div className="pixel-inset px-2 py-1.5 text-[8px] text-accent-amber !bg-accent-amber/10 !border-accent-amber/40">
-          <span
-            className={`inline-block w-1.5 h-1.5 ${gateDot} border border-wood-dark mr-1 align-middle`}
-          />
-          <span className="uppercase tracking-widest">Gate</span>{" "}
-          <span className="text-ink">{event.agentName} awaiting approval</span>
+        <div className="pixel-inset px-2 py-1.5 text-[8px] text-accent-amber !bg-accent-amber/10 !border-accent-amber/40 flex items-center gap-1.5">
+          <AgentAvatar src={agentAvatarMap[event.agentName]} size={14} />
+          <span>
+            <span className="uppercase tracking-widest">Gate</span>{" "}
+            <span className="text-ink">{event.agentName} awaiting approval</span>
+          </span>
         </div>
       );
-    }
 
     case "ERROR":
       return (
@@ -409,55 +404,3 @@ function EventEntry({
   }
 }
 
-function TaskSummaryEntry({
-  event,
-  agentDotMap,
-  relTime,
-}: {
-  event: TaskSummaryEvent;
-  agentDotMap: Record<string, string>;
-  relTime: string | null;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const dot = agentDotMap[event.agentName] || "bg-wood";
-
-  const outputLines = event.fullOutput.trim().split("\n");
-  const preview = outputLines.slice(0, 3).join("\n");
-  const hasMore = outputLines.length > 3;
-
-  return (
-    <div className="bg-parchment-light/50 border border-text-dark/[0.06] rounded text-[8px]">
-      <div className="flex items-start gap-1.5 px-1.5 py-1">
-        <span
-          className={`w-2 h-2 mt-[1px] ${dot} border border-wood-dark shrink-0 rounded-sm`}
-        />
-        <div className="min-w-0 flex-1">
-          <span className="text-ink font-bold">{event.agentName}</span>
-          <span className="text-accent-green mx-1">&#10003;</span>
-          <span className="text-wood-dark text-[7px]">Finished.</span>
-          <p className="text-wood-dark break-words leading-snug mt-0.5">
-            {event.summary}
-          </p>
-        </div>
-        {relTime && <span className="text-[6px] text-wood-light/60 tabular-nums shrink-0">{relTime}</span>}
-      </div>
-
-      <div className="px-2 pb-1 border-t border-text-dark/[0.06]">
-        <span className="text-[6px] text-wood uppercase tracking-widest">
-          Output
-        </span>
-        <pre className="text-[7px] text-wood-dark whitespace-pre-wrap break-words leading-snug mt-0.5">
-          {expanded ? event.fullOutput.trim() : preview}
-        </pre>
-        {hasMore && (
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="text-[7px] text-accent-blue hover:underline cursor-pointer mt-0.5"
-          >
-            {expanded ? "Show less" : `Show more (${outputLines.length} lines)`}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}

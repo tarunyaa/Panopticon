@@ -347,22 +347,18 @@ export function TeamPlanScreen({
   // ── REVIEW PHASE ──
   return (
     <div className="onboarding-overlay">
-      <div className="pixel-panel p-6 w-full max-w-4xl max-h-[85vh] flex flex-col gap-4 mx-4 overflow-y-auto">
+      <div className="pixel-panel p-4 w-full max-w-3xl flex flex-col gap-2 mx-4">
         <div className="flex items-center justify-between">
           <h2 className="font-pixel text-[10px] text-ink tracking-widest uppercase">
             Your Team
           </h2>
-          <span className="font-pixel text-[9px] text-wood">
-            {agents.length + 1} / {MAX_AGENTS}
+          <span className="font-pixel text-[8px] text-wood">
+            {agents.length + 1}/{MAX_AGENTS} &middot; Click to edit
           </span>
         </div>
 
-        <p className="font-pixel text-[8px] text-wood text-center">
-          Click agents to view/edit. Leader can't be edited.
-        </p>
-
         {/* Agent roster grid */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5">
           {slots.map((agent, i) => (
             <AgentSlotCard
               key={i}
@@ -375,9 +371,9 @@ export function TeamPlanScreen({
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col items-center gap-2 mt-2">
+        <div className="flex items-center justify-center gap-3">
           <button
-            className="pixel-btn font-pixel text-[12px] px-8 py-3 text-ink tracking-wider uppercase"
+            className="pixel-btn font-pixel text-[11px] px-6 py-2 text-ink tracking-wider uppercase"
             disabled={agents.length < 1 || entering}
             onClick={onEnterVillage}
           >
@@ -393,12 +389,12 @@ export function TeamPlanScreen({
           >
             Start over
           </button>
-          {error && (
-            <span className="font-pixel text-[8px] text-red-400">
-              {error}
-            </span>
-          )}
         </div>
+        {error && (
+          <span className="font-pixel text-[8px] text-red-400 text-center">
+            {error}
+          </span>
+        )}
       </div>
 
       {/* Agent Form Modal */}

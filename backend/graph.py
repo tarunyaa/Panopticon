@@ -62,6 +62,21 @@ class PanopticonState(TypedDict):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _estimate_max_tokens(description: str, expected_output: str) -> int:
+    """Classify task complexity by keywords and return an appropriate max_tokens."""
+    text = (description + " " + expected_output).lower()
+    long_keywords = ("code", "implementation", "implement", "full document", "research paper", "write code", "develop")
+    short_keywords = ("rubric", "outline", "summary", "list", "review", "feedback", "plan", "checklist", "brief")
+    for kw in long_keywords:
+        if kw in text:
+            return 4096
+    for kw in short_keywords:
+        if kw in text:
+            return 1024
+    # Default: medium
+    return 2048
+
+
 def _summarize_output(text: str, limit: int = 160) -> str:
     """Produce a clean one-liner summary from agent output."""
     text = re.sub(r"^#+\s*", "", text)
@@ -102,13 +117,31 @@ def make_worker_node(
         # Build tools and LLM
         agent_tools = instantiate_tools(agent_config.get("tools", []))
 
+        max_tokens = _estimate_max_tokens(
+            task_config.get("description", ""),
+            task_config.get("expected_output", ""),
+        )
         llm = ChatAnthropic(
             model=_MODEL,
             api_key=os.environ.get("ANTHROPIC_API_KEY"),
-            max_tokens=4096,
+            max_tokens=max_tokens,
         )
 
-        # System prompt
+        # System prompt — only mention tools the agent actually has
+        agent_tool_ids = set(agent_config.get("tools", []))
+
+        workspace_lines = ""
+        if "file_reader" in agent_tool_ids or "list_input_files" in agent_tool_ids:
+            workspace_lines += "- Use list_input_files and file_reader to read any reference materials the user placed in the input folder.\n"
+        if "file_writer" in agent_tool_ids:
+            workspace_lines += "- Use file_writer to save deliverables (reports, code, data) to the output folder.\n"
+
+        tool_rule_lines = ""
+        if "web_search" in agent_tool_ids:
+            tool_rule_lines += "- web_search is for quick fact lookups (recent stats, prices, current events) — not general knowledge.\n"
+        if "web_scraper" in agent_tool_ids:
+            tool_rule_lines += "- web_scraper is only for reading a specific URL you already have — never scrape speculatively.\n"
+
         system_msg = (
             f"You are {agent_name}.\n"
             f"Role: {agent_config['role'].strip()}\n"
@@ -116,15 +149,24 @@ def make_worker_node(
             f"Backstory: {agent_config['backstory'].strip()}\n\n"
             f"Complete the task described below. Be thorough and produce high-quality output.\n"
             f"When you are done, provide your final answer directly — do not use any special markers.\n\n"
-            f"WORKSPACE:\n"
-            f"- Use list_input_files and file_reader to read any reference materials the user placed in the input folder.\n"
-            f"- Use file_writer to save deliverables (reports, code, data) to the output folder.\n\n"
-            f"TOOL USE RULES:\n"
-            f"- Only use tools when you NEED external information you do not already know.\n"
-            f"- Do NOT search for things you can answer from your own knowledge.\n"
-            f"- web_search is for quick fact lookups (recent stats, prices, current events) — not general knowledge.\n"
-            f"- web_scraper is only for reading a specific URL you already have — never scrape speculatively.\n"
-            f"- Prefer producing your answer directly over unnecessary tool calls."
+        )
+
+        if workspace_lines:
+            system_msg += f"WORKSPACE:\n{workspace_lines}\n"
+
+        if agent_tool_ids:
+            system_msg += (
+                f"TOOL USE RULES:\n"
+                f"- Only use tools when you NEED external information you do not already know.\n"
+                f"- Do NOT search for things you can answer from your own knowledge.\n"
+                f"{tool_rule_lines}"
+                f"- Prefer producing your answer directly over unnecessary tool calls.\n\n"
+            )
+
+        system_msg += (
+            f"OUTPUT LENGTH:\n"
+            f"- Be concise — match your output length to the complexity of the task.\n"
+            f"- Short tasks (outlines, lists, reviews) need short answers. Only elaborate for complex deliverables."
         )
 
         # Build task description
@@ -164,13 +206,26 @@ def make_worker_node(
         )
 
         # Extract final output from last AI message
+        # Claude may return content as a list of blocks (e.g. [{"type":"text","text":"..."}])
+        # rather than a plain string, so handle both formats.
         final_output = ""
         for msg in reversed(result["messages"]):
-            if hasattr(msg, "content") and isinstance(msg.content, str) and msg.content.strip():
-                final_output = msg.content
+            if getattr(msg, "type", None) != "ai":
+                continue
+            content = msg.content
+            if isinstance(content, str) and content.strip():
+                final_output = content
                 break
+            elif isinstance(content, list):
+                text_parts = [
+                    block["text"] for block in content
+                    if isinstance(block, dict) and block.get("type") == "text" and block.get("text", "").strip()
+                ]
+                if text_parts:
+                    final_output = "\n".join(text_parts)
+                    break
         if not final_output:
-            final_output = str(result["messages"][-1].content) if result["messages"] else "(no output)"
+            final_output = "(no output)"
 
         # Gate logic
         is_last = task_index == total_tasks - 1
@@ -182,7 +237,6 @@ def make_worker_node(
 
         if should_gate:
             gate_id = str(uuid.uuid4())
-            summary = _summarize_output(final_output)
 
             question = f"{agent_name} finished their task. Continue?"
             if is_last:
@@ -196,7 +250,7 @@ def make_worker_node(
                 "run_id": run_id,
                 "agent_name": agent_name,
                 "question": question,
-                "context": summary,
+                "context": final_output,
                 "reason": reason,
                 "gate_source": "task_complete",
             })

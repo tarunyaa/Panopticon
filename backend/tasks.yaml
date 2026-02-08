@@ -3,35 +3,34 @@ adam_task:
   expected_output: Successful team coordination and project completion.
   agent: adam
 abigail_task:
-  description: 'Create an original haiku about: {prompt}'
-  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
-    and emotional resonance related to the theme
+  description: 'Write a traditional haiku about: {prompt}'
+  expected_output: A single haiku in 5-7-5 syllable format with a seasonal reference,
+    following classical Japanese haiku conventions.
   agent: abigail
 carlos_task:
-  description: 'Create an original haiku about: {prompt}'
-  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
-    and emotional resonance related to the theme
+  description: 'Write a modern haiku about: {prompt}'
+  expected_output: A single haiku with contemporary styling, potentially varying from
+    strict 5-7-5 structure, with fresh modern imagery.
   agent: carlos
 isabella_task:
-  description: 'Create an original haiku about: {prompt}'
-  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
-    and emotional resonance related to the theme
+  description: 'Write a sensory-rich haiku about: {prompt}'
+  expected_output: A single haiku that prominently features strong sensory imagery,
+    making the natural scene tangible and immediate.
   agent: isabella
 klaus_task:
-  description: 'Create an original haiku about: {prompt}'
-  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
-    and emotional resonance related to the theme
+  description: 'Write a minimalist haiku about: {prompt}'
+  expected_output: A single haiku with stark simplicity, using minimal words to create
+    maximum resonance and contemplative space.
   agent: klaus
 ayesha_task:
-  description: 'Create an original haiku about: {prompt}'
-  expected_output: One complete haiku (5-7-5 syllable structure) with vivid imagery
-    and emotional resonance related to the theme
+  description: 'Write an emotionally resonant haiku about: {prompt}'
+  expected_output: A single haiku that conveys a clear emotional tone or feeling inspired
+    by the natural subject.
   agent: ayesha
 eddy_task:
-  description: 'Create an evaluation rubric and provide detailed analysis for haikus
-    about: {prompt}'
-  expected_output: A comprehensive evaluation rubric with 4-6 criteria (each with
-    clear descriptors), followed by individual analysis of each submitted haiku scored
-    against the rubric, highlighting strengths and distinctive qualities to help the
-    user make an informed selection
+  description: Review all submitted haikus for {prompt} and select the best one
+  expected_output: The single best haiku selected from all submissions, along with
+    a brief justification (2-3 sentences) explaining why it was chosen based on criteria
+    such as imagery, emotional impact, adherence to or creative deviation from form,
+    and overall poetic merit.
   agent: eddy

@@ -125,12 +125,17 @@ def translate_event(
     event: dict,
     worker_nodes: set[str],
     node_meta: dict[str, dict],
+    _last_activity: dict[str, str] | None = None,
 ) -> list[dict]:
     """Map a LangGraph astream_events(v2) event to 0+ frontend events.
 
     Returns a list of JSON-serialisable dicts matching the existing frontend
     event contract (RUN_STARTED, AGENT_INTENT, AGENT_ACTIVITY, TASK_SUMMARY,
     TASK_HANDOFF, etc.).
+
+    ``_last_activity`` is a caller-owned dict mapping agent_name -> last
+    activity type.  It is used to suppress duplicate ``llm_generating`` events
+    so the frontend only receives one "thinking …" per generation burst.
     """
     kind = event.get("event", "")
     name = event.get("name", "")
@@ -182,6 +187,12 @@ def translate_event(
     if kind == "on_chat_model_stream" and lg_node in worker_nodes:
         meta = node_meta.get(lg_node, {})
         agent_name = meta.get("agent_name", lg_node)
+        # Suppress duplicate llm_generating events — only emit the first one
+        # per generation burst so the sidebar doesn't flood with "thinking…"
+        if _last_activity is not None:
+            if _last_activity.get(agent_name) == "llm_generating":
+                return results  # already sent one, skip
+            _last_activity[agent_name] = "llm_generating"
         results.append({
             "type": "AGENT_ACTIVITY",
             "agentName": agent_name,
@@ -195,6 +206,8 @@ def translate_event(
         meta = node_meta.get(lg_node, {})
         agent_name = meta.get("agent_name", lg_node)
         tool_name = name or "unknown_tool"
+        if _last_activity is not None:
+            _last_activity[agent_name] = "tool_call"
         results.append({
             "type": "AGENT_ACTIVITY",
             "agentName": agent_name,
@@ -206,14 +219,12 @@ def translate_event(
 
     # --- Tool ends ---
     if kind == "on_tool_end" and lg_node in worker_nodes:
-        meta = node_meta.get(lg_node, {})
-        agent_name = meta.get("agent_name", lg_node)
-        results.append({
-            "type": "AGENT_ACTIVITY",
-            "agentName": agent_name,
-            "activity": "idle",
-            "details": "",
-        })
+        # Don't emit idle between tool calls — agent is still working.
+        # Just reset the tracker so the next on_chat_model_stream fires.
+        if _last_activity is not None:
+            meta = node_meta.get(lg_node, {})
+            agent_name = meta.get("agent_name", lg_node)
+            _last_activity[agent_name] = "tool_end"
         return results
 
     # --- Worker node ends (on_chain_end where name is a worker node) ---
@@ -221,12 +232,15 @@ def translate_event(
         meta = node_meta.get(name, {})
         agent_name = meta.get("agent_name", name)
 
-        # Reset activity to idle
+        if _last_activity is not None:
+            _last_activity[agent_name] = "done"
+
+        # Mark activity as done (agent is walking back to DORM)
         results.append({
             "type": "AGENT_ACTIVITY",
             "agentName": agent_name,
-            "activity": "idle",
-            "details": "",
+            "activity": "done",
+            "details": "Task complete",
         })
 
         # Try to extract the output from the chain output
@@ -605,13 +619,19 @@ async def run_websocket(websocket: WebSocket, run_id: str):
         # 6. Plan task delegation (CPU-bound LLM call — run in thread)
         delegation_result = await asyncio.to_thread(plan_task_delegation, prompt)
 
-        # 7. Leader done planning
+        # 7. Leader done planning — send to DORM so it doesn't idle at CAFE
         if leader_name:
             await websocket.send_text(json.dumps({
                 "type": "AGENT_ACTIVITY",
                 "agentName": leader_name,
-                "activity": "idle",
-                "details": "",
+                "activity": "done",
+                "details": "Task complete",
+            }))
+            await websocket.send_text(json.dumps({
+                "type": "TASK_SUMMARY",
+                "agentName": leader_name,
+                "summary": "Delegated tasks to the team",
+                "fullOutput": "",
             }))
 
         if delegation_result["type"] == "error":
@@ -635,6 +655,9 @@ async def run_websocket(websocket: WebSocket, run_id: str):
         worker_nodes = set(node_meta.keys())
         _run_graphs[run_id] = compiled_graph
 
+        # Track last activity per agent to deduplicate llm_generating events
+        _last_activity: dict[str, str] = {}
+
         # 9. Streaming loop with interrupt/resume
         graph_input: dict | Command = {
             "prompt": prompt,
@@ -651,7 +674,7 @@ async def run_websocket(websocket: WebSocket, run_id: str):
             async for event in compiled_graph.astream_events(
                 graph_input, version="v2", config=config,
             ):
-                frontend_events = translate_event(event, worker_nodes, node_meta)
+                frontend_events = translate_event(event, worker_nodes, node_meta, _last_activity)
                 for fe in frontend_events:
                     await websocket.send_text(json.dumps(fe))
 
@@ -702,7 +725,16 @@ async def run_websocket(websocket: WebSocket, run_id: str):
 
             graph_input = Command(resume=response)
 
-        # 10. Send RUN_FINISHED
+        # 10. Send final output (synthesized deliverable)
+        final_state = await compiled_graph.aget_state(config)
+        final_output = final_state.values.get("final_output", "")
+        if final_output:
+            await websocket.send_text(json.dumps({
+                "type": "FINAL_OUTPUT",
+                "output": final_output,
+            }))
+
+        # 11. Send RUN_FINISHED
         await websocket.send_text(json.dumps({
             "type": "RUN_FINISHED",
             "runId": run_id,

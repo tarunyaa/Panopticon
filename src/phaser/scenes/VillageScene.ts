@@ -24,6 +24,10 @@ export class VillageScene extends Phaser.Scene {
   cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   /** Cache of latest task summary per agent name, used for handoff bubbles */
   private agentSummaries: Record<string, string> = {};
+  /** Agents currently in a handoff animation — delays their WORKSHOP departure */
+  private handoffInProgress = new Set<string>();
+  /** Pending delayed calls to move agents to WORKSHOP — cancel on task finish */
+  private workshopTimers = new Map<string, Phaser.Time.TimerEvent>();
 
   constructor() {
     super("VillageScene");
@@ -130,6 +134,12 @@ export class VillageScene extends Phaser.Scene {
     };
     this.game.events.on("spawn-agents", spawnAgentsHandler);
 
+    // Spawn user avatar as static sprite at HOUSE
+    const spawnUserHandler = (info: { name: string; spriteKey: string }) => {
+      this.spawnUserAtHouse(info.name, info.spriteKey);
+    };
+    this.game.events.on("spawn-user", spawnUserHandler);
+
     // Listen for new agents created via the sidebar
     const agentCreatedHandler = (agent: AgentInfo, index: number) => {
       const def = agentInfoToDef(agent, index);
@@ -137,11 +147,11 @@ export class VillageScene extends Phaser.Scene {
     };
     this.game.events.on("agent-created", agentCreatedHandler);
 
-    // Camera setup — center on PARK zone where agents spawn
+    // Camera setup — center between zones so most of the village is visible
     const camera = this.cameras.main;
     camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
     camera.setZoom(0.5);
-    camera.centerOn(2912, 1056);
+    camera.centerOn(3200, 1200);
 
     // Zoom controls: - to zoom out, = to zoom in
     this.input.keyboard!.on("keydown-MINUS", () => {
@@ -154,15 +164,20 @@ export class VillageScene extends Phaser.Scene {
       camera.setZoom(Math.min(2, camera.zoom + 0.1));
     });
 
-    // Listen for agent intent events → show bubble at CAFE, then depart
+    // Listen for agent intent events → move to WORKSHOP (no bubble)
     const intentHandler = (ev: AgentIntentEvent) => {
-      this.agentRegistry.showBubble(ev.agentName, ev.message);
       this.agentRegistry.logEvent(ev.agentName, `\u{1F4AC} ${ev.message}`);
-      // Delay departure so the bubble is visible at the cafe
-      this.time.delayedCall(2000, () => {
+      // Cancel any existing WORKSHOP timer for this agent
+      const existing = this.workshopTimers.get(ev.agentName);
+      if (existing) existing.remove();
+      // If agent is in a handoff animation, extend the delay before departure
+      const delay = this.handoffInProgress.has(ev.agentName) ? 5000 : 2000;
+      const timer = this.time.delayedCall(delay, () => {
+        this.workshopTimers.delete(ev.agentName);
         this.agentRegistry.setTarget(ev.agentName, "WORKSHOP");
         this.agentRegistry.setProgress(ev.agentName, 0.15);
       });
+      this.workshopTimers.set(ev.agentName, timer);
     };
     wsClient.on("intent", intentHandler);
 
@@ -196,6 +211,9 @@ export class VillageScene extends Phaser.Scene {
           });
         });
 
+        // Mark receiving agent as in handoff so AGENT_INTENT delays departure
+        this.handoffInProgress.add(ev.receivingAgent);
+
         // Receiving agent acknowledges after all sources have spoken
         const receiveDelay = 500 + 1500 * ev.sourceAgents.length + 500;
         this.time.delayedCall(receiveDelay, () => {
@@ -205,7 +223,19 @@ export class VillageScene extends Phaser.Scene {
             150
           );
         });
+
+        // Clear the handoff flag after the full animation completes
+        const handoffDuration = receiveDelay + 2500;
+        this.time.delayedCall(handoffDuration, () => {
+          this.handoffInProgress.delete(ev.receivingAgent);
+        });
       } else if (ev.type === "TASK_SUMMARY") {
+        // Cancel pending WORKSHOP move — task is already done
+        const pendingTimer = this.workshopTimers.get(ev.agentName);
+        if (pendingTimer) {
+          pendingTimer.remove();
+          this.workshopTimers.delete(ev.agentName);
+        }
         // Cache summary for use in handoff bubbles
         this.agentSummaries[ev.agentName] = ev.summary;
         this.agentRegistry.logEvent(ev.agentName, `\u2705 Done: ${ev.summary.slice(0, 60)}`);
@@ -216,11 +246,22 @@ export class VillageScene extends Phaser.Scene {
         this.agentRegistry.setTarget(ev.agentName, "HOUSE");
         this.agentRegistry.logEvent(ev.agentName, `\u{1F6D1} Gate: ${ev.question}`);
       } else if (ev.type === "RUN_FINISHED") {
+        // Cancel all pending WORKSHOP timers
+        for (const [, t] of this.workshopTimers) t.remove();
+        this.workshopTimers.clear();
         // All done — agents return to DORM (idle)
         this.agentRegistry.moveAllToZone("DORM");
+        for (const agent of this.agentRegistry.getAll()) {
+          this.agentRegistry.setActivity(agent.def.name, "idle", "");
+        }
       } else if (ev.type === "AGENT_ACTIVITY") {
         // Update agent activity state (also logs internally)
         this.agentRegistry.setActivity(ev.agentName, ev.activity, ev.details);
+
+        // Leader planning — show a speech bubble so it's visible
+        if (ev.activity === "planning") {
+          this.agentRegistry.showBubble(ev.agentName, "Planning delegation...", 300);
+        }
       }
     };
     wsClient.on("event", eventHandler);
@@ -236,7 +277,41 @@ export class VillageScene extends Phaser.Scene {
       wsClient.off("event", eventHandler);
       this.game.events.off("agent-created", agentCreatedHandler);
       this.game.events.off("spawn-agents", spawnAgentsHandler);
+      this.game.events.off("spawn-user", spawnUserHandler);
     });
+  }
+
+  /** Place a static user sprite at fixed position */
+  private spawnUserAtHouse(name: string, spriteKey: string): void {
+    const pos = { x: 3616, y: 768 }; // tile (113,24)
+
+    this.agentRegistry.ensureAnimsFor(spriteKey);
+
+    const sprite = this.physics.add
+      .sprite(pos.x, pos.y, spriteKey, 1)
+      .setSize(28, 28)
+      .setOffset(2, 2)
+      .setScale(2)
+      .setDepth(10);
+
+    // Name label (always visible for user)
+    this.add
+      .text(pos.x, pos.y - 36, `${name}\n(You)`, {
+        fontSize: "11px",
+        fontStyle: "bold",
+        color: "#3A2820",
+        backgroundColor: "#E8DCC8dd",
+        padding: { x: 4, y: 2 },
+        align: "center",
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(11);
+
+    // Color marker under sprite
+    this.add.circle(pos.x, pos.y + 8, 14, 0xf0c060, 0.7).setDepth(9);
+
+    // Idle animation — just face down
+    sprite.setFrame(1);
   }
 
   update(): void {

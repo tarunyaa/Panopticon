@@ -95,6 +95,12 @@ class TaskHandoffEvent:
 
 
 @dataclass
+class FinalOutputEvent:
+    type: str = "FINAL_OUTPUT"
+    output: str = ""
+
+
+@dataclass
 class GateResponse:
     action: str = "approve"   # "approve" | "reject"
     note: str = ""

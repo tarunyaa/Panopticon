@@ -41,7 +41,17 @@ const BAR_WIDTH = 50;
 const BAR_HEIGHT = 8;
 const MAX_LOG_ENTRIES = 30;
 
-const ZONE_MAP = zones as Record<ZoneId, { x: number; y: number; label: string }>;
+interface ZoneBounds { x1: number; y1: number; x2: number; y2: number }
+interface ZoneSpot { x: number; y: number }
+interface ZoneData {
+  label: string;
+  bounds?: ZoneBounds;
+  spots?: ZoneSpot[];
+  overflow?: ZoneBounds;
+  options?: ZoneSpot[];
+}
+const ZONE_MAP = zones as Record<ZoneId, ZoneData>;
+const ZONE_SPACING = 64; // 2 tiles
 
 /** Emoji for each activity state */
 const ACTIVITY_EMOJI: Record<string, string> = {
@@ -49,16 +59,25 @@ const ACTIVITY_EMOJI: Record<string, string> = {
   tool_call: "\ud83d\udd28",     // hammer
   llm_generating: "\ud83e\udde0", // brain
   planning: "\ud83d\udccb",       // clipboard (whiteboard) — leader planning/delegating
+  done: "\u2705",                 // checkmark — task complete, walking back
 };
+
+/** Serializable payload emitted to React via game events */
+export interface AgentInspectData {
+  id: string;
+  name: string;
+  role: string;
+  spriteKey: string;
+  activity: string;
+  activityDetails: string;
+  log: AgentLogEntry[];
+}
 
 export class AgentRegistry {
   agents: AgentEntry[] = [];
 
-  // --- Inspect panel state ---
-  private inspectedAgent: AgentEntry | null = null;
-  private inspectBg?: Phaser.GameObjects.Graphics;
-  private inspectTexts: Phaser.GameObjects.Text[] = [];
-  private inspectTitle?: Phaser.GameObjects.Text;
+  // --- Inspect state (id only — panel lives in React) ---
+  private inspectedAgentId: string | null = null;
 
   // --- Handoff line state ---
   private handoffLines: Array<{
@@ -77,7 +96,9 @@ export class AgentRegistry {
     }
   }
 
-  /** Create walk animations for a sprite key if they don't exist yet */
+  /** Create walk animations for a sprite key if they don't exist yet (public alias) */
+  ensureAnimsFor(key: string): void { this.ensureAnims(key); }
+
   private ensureAnims(key: string): void {
     if (this.scene.anims.exists(`${key}-walk-down`)) return;
     this.scene.anims.create({
@@ -123,6 +144,7 @@ export class AgentRegistry {
     const label = this.scene.add
       .text(x, y - 36, `${def.name}\n${def.role}`, {
         fontSize: "11px",
+        fontStyle: "bold",
         color: "#3A2820",
         backgroundColor: "#E8DCC8dd",
         padding: { x: 4, y: 2 },
@@ -136,13 +158,12 @@ export class AgentRegistry {
     sprite.setInteractive({ useHandCursor: true });
     sprite.on("pointerover", () => label.setVisible(true));
     sprite.on("pointerout", () => {
-      // Don't hide if this agent is inspected
-      if (this.inspectedAgent?.def.id !== def.id) {
+      if (this.inspectedAgentId !== def.id) {
         label.setVisible(false);
       }
     });
 
-    // Click to inspect
+    // Click to inspect — emit to React
     sprite.on("pointerdown", () => {
       this.toggleInspect(def.id);
     });
@@ -166,23 +187,20 @@ export class AgentRegistry {
     };
   }
 
-  /** Spawn multiple agents at PARK, spaced 10 tiles apart */
+  /** Spawn multiple agents at DORM (idle zone) */
   spawn(defs: AgentDef[]): void {
-    const park = ZONE_MAP["PARK"];
-
     defs.forEach((def, i) => {
-      const offset = (i - (defs.length - 1) / 2) * 320;
-      const entry = this.createAgentAt(def, park.x + offset, park.y);
+      const pos = this.getZonePosition("DORM", i, defs.length);
+      const entry = this.createAgentAt(def, pos.x, pos.y);
       this.agents.push(entry);
     });
   }
 
-  /** Spawn a single agent at runtime at PARK, offset from existing agents */
+  /** Spawn a single agent at runtime at DORM */
   spawnOne(def: AgentDef): void {
-    const park = ZONE_MAP["PARK"];
     const total = this.agents.length + 1;
-    const offset = (this.agents.length - (total - 1) / 2) * 320;
-    const entry = this.createAgentAt(def, park.x + offset, park.y);
+    const pos = this.getZonePosition("DORM", this.agents.length, total);
+    const entry = this.createAgentAt(def, pos.x, pos.y);
     this.agents.push(entry);
   }
 
@@ -192,34 +210,66 @@ export class AgentRegistry {
   setTarget(agentName: string, zone: ZoneId): void {
     const agent = this.findAgent(agentName);
     if (!agent) return;
-    const z = ZONE_MAP[zone];
-    if (!z) return;
-
     const i = this.agents.indexOf(agent);
-    const offset = (i - (this.agents.length - 1) / 2) * 64;
-
-    // Handle WORKSHOP with multiple coordinate options
-    if (zone === "WORKSHOP" && (z as any).options) {
-      const options = (z as any).options as Array<{ x: number; y: number }>;
-      const chosen = options[i % options.length];
-      agent.targetX = chosen.x;
-      agent.targetY = chosen.y;
-    } else {
-      agent.targetX = z.x + offset;
-      agent.targetY = z.y;
-    }
+    const pos = this.getZonePosition(zone, i, this.agents.length);
+    agent.targetX = pos.x;
+    agent.targetY = pos.y;
   }
 
-  /** Move all agents to a zone, spaced 2 tiles apart so they don't overlap */
+  /** Move all agents to a zone */
   moveAllToZone(zone: ZoneId): void {
-    const z = ZONE_MAP[zone];
-    if (!z) return;
-
     this.agents.forEach((agent, i) => {
-      const offset = (i - (this.agents.length - 1) / 2) * 64;
-      agent.targetX = z.x + offset;
-      agent.targetY = z.y;
+      const pos = this.getZonePosition(zone, i, this.agents.length);
+      agent.targetX = pos.x;
+      agent.targetY = pos.y;
     });
+  }
+
+  // ---- Zone placement helpers ----
+
+  /** Get the pixel position for agent `index` (of `total`) inside `zone` */
+  private getZonePosition(zone: ZoneId, index: number, total: number): ZoneSpot {
+    const z = ZONE_MAP[zone];
+
+    // WORKSHOP — round-robin through fixed options
+    if (zone === "WORKSHOP" && z.options) {
+      return z.options[index % z.options.length];
+    }
+
+    // DORM — first N go to specific spots, rest overflow into a rect
+    if (zone === "DORM" && z.spots) {
+      if (index < z.spots.length) {
+        return z.spots[index];
+      }
+      if (z.overflow) {
+        return this.placeInBounds(z.overflow, index - z.spots.length, total - z.spots.length);
+      }
+    }
+
+    // Rectangle zones (PARK, CAFE, HOUSE) — grid within bounds
+    if (z.bounds) {
+      return this.placeInBounds(z.bounds, index, total);
+    }
+
+    return { x: 0, y: 0 };
+  }
+
+  /** Distribute agent `index` (of `total`) evenly inside a rectangle */
+  private placeInBounds(b: ZoneBounds, index: number, total: number): ZoneSpot {
+    if (total <= 0) total = 1;
+    const w = b.x2 - b.x1;
+    const h = b.y2 - b.y1;
+    const cols = Math.max(1, Math.floor(w / ZONE_SPACING) + 1);
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const actualCols = Math.min(cols, total);
+    const rows = Math.ceil(total / cols);
+    const gridW = (actualCols - 1) * ZONE_SPACING;
+    const gridH = (rows - 1) * ZONE_SPACING;
+    return {
+      x: b.x1 + (w - gridW) / 2 + col * ZONE_SPACING,
+      y: b.y1 + (h - gridH) / 2 + row * ZONE_SPACING,
+    };
   }
 
   setProgress(agentName: string, progress: number): void {
@@ -342,6 +392,8 @@ export class AgentRegistry {
         logText = `${emoji} Thinking...`;
       } else if (activity === "planning") {
         logText = `${emoji} ${details || "Planning..."}`;
+      } else if (activity === "done") {
+        logText = `${emoji} ${details || "Task complete"}`;
       } else if (activity === "idle" && prev !== "idle") {
         logText = `${emoji} Idle`;
       }
@@ -349,44 +401,38 @@ export class AgentRegistry {
         this.addLog(agent, logText);
       }
     }
+
+    // Always push activity change to React inspect panel
+    if (this.inspectedAgentId === agent.def.id) {
+      this.emitInspect(agent);
+    }
   }
 
   /** Update emoji activity icon positions and visibility each frame */
   tickActivityIcons(): void {
+    const bounce = Math.sin(Date.now() * 0.005) * 3; // gentle 3px bounce
     for (const agent of this.agents) {
       const emoji = ACTIVITY_EMOJI[agent.activity];
-      const ix = agent.sprite.x + 26;
-      const iy = agent.sprite.y - 32;
+      const ix = agent.sprite.x + 20;
+      const iy = agent.sprite.y - 30 + bounce;
 
-      if (agent.activity !== "idle" && emoji) {
+      if (emoji) {
         if (!agent.activityEmoji) {
           agent.activityEmoji = this.scene.add
-            .text(ix, iy, emoji, { fontSize: "18px" })
+            .text(ix, iy, emoji, { fontSize: "16px" })
             .setOrigin(0.5, 0.5)
             .setDepth(15);
-          // Bounce animation
-          this.scene.tweens.add({
-            targets: agent.activityEmoji,
-            y: iy - 6,
-            duration: 500,
-            yoyo: true,
-            repeat: -1,
-            ease: "Sine.easeInOut",
-          });
-        } else {
-          agent.activityEmoji
-            .setPosition(ix, agent.activityEmoji.y) // keep y from tween
-            .setText(emoji)
-            .setVisible(true);
         }
-      } else if (agent.activityEmoji) {
-        agent.activityEmoji.setVisible(false);
+        agent.activityEmoji
+          .setPosition(ix, iy)
+          .setText(emoji)
+          .setVisible(true);
       }
     }
   }
 
   // =========================================================================
-  // Feature 2: Click-to-inspect agent log panel
+  // Feature 2: Click-to-inspect — data lives here, panel is in React
   // =========================================================================
 
   /** Add a log entry for an agent */
@@ -395,9 +441,9 @@ export class AgentRegistry {
     if (agent.log.length > MAX_LOG_ENTRIES) {
       agent.log.shift();
     }
-    // If this agent is being inspected, refresh the panel
-    if (this.inspectedAgent?.def.id === agent.def.id) {
-      this.renderInspectPanel();
+    // Push update to React if this agent is inspected
+    if (this.inspectedAgentId === agent.def.id) {
+      this.emitInspect(agent);
     }
   }
 
@@ -407,120 +453,47 @@ export class AgentRegistry {
     if (agent) this.addLog(agent, text);
   }
 
-  /** Toggle the inspect panel for an agent */
+  /** Toggle inspect and emit to React */
   private toggleInspect(agentId: string): void {
-    if (this.inspectedAgent?.def.id === agentId) {
-      // Close
-      this.closeInspect();
+    if (this.inspectedAgentId === agentId) {
+      // Close — unhide label, emit null
+      const prev = this.agents.find((a) => a.def.id === agentId);
+      if (prev) prev.label.setVisible(false);
+      this.inspectedAgentId = null;
+      this.scene.game.events.emit("agent-inspect", null);
       return;
     }
 
     // Close previous
-    this.closeInspect();
+    if (this.inspectedAgentId) {
+      const prev = this.agents.find((a) => a.def.id === this.inspectedAgentId);
+      if (prev) prev.label.setVisible(false);
+    }
 
     const agent = this.agents.find((a) => a.def.id === agentId);
     if (!agent) return;
 
-    this.inspectedAgent = agent;
+    this.inspectedAgentId = agentId;
     agent.label.setVisible(true);
-    this.renderInspectPanel();
+    this.emitInspect(agent);
   }
 
-  private closeInspect(): void {
-    if (this.inspectedAgent) {
-      this.inspectedAgent.label.setVisible(false);
-    }
-    this.inspectedAgent = null;
-    this.inspectBg?.destroy();
-    this.inspectBg = undefined;
-    this.inspectTitle?.destroy();
-    this.inspectTitle = undefined;
-    for (const t of this.inspectTexts) t.destroy();
-    this.inspectTexts = [];
+  /** Emit serializable inspect data to React via game events */
+  private emitInspect(agent: AgentEntry): void {
+    const data: AgentInspectData = {
+      id: agent.def.id,
+      name: agent.def.name,
+      role: agent.def.role,
+      spriteKey: agent.def.spriteKey,
+      activity: agent.activity,
+      activityDetails: agent.activityDetails,
+      log: [...agent.log],
+    };
+    this.scene.game.events.emit("agent-inspect", data);
   }
 
-  private renderInspectPanel(): void {
-    // Clean old renders
-    this.inspectBg?.destroy();
-    this.inspectTitle?.destroy();
-    for (const t of this.inspectTexts) t.destroy();
-    this.inspectTexts = [];
-
-    const agent = this.inspectedAgent;
-    if (!agent) return;
-
-    const panelW = 220;
-    const lineH = 16;
-    const padX = 8;
-    const padY = 6;
-    const maxVisible = 8;
-
-    const entries = agent.log.slice(-maxVisible);
-    const titleH = 22;
-    const panelH = titleH + padY + entries.length * lineH + padY;
-
-    // Position panel to the right of the sprite
-    const px = agent.sprite.x + 40;
-    const py = agent.sprite.y - panelH / 2;
-
-    // Background
-    const bg = this.scene.add.graphics().setDepth(20);
-    bg.fillStyle(0xE8DCC8, 0.94);
-    bg.fillRoundedRect(px, py, panelW, panelH, 8);
-    bg.lineStyle(2, 0x6B5040, 0.8);
-    bg.strokeRoundedRect(px, py, panelW, panelH, 8);
-    this.inspectBg = bg;
-
-    // Title
-    const emoji = ACTIVITY_EMOJI[agent.activity] || "\ud83d\udca4";
-    this.inspectTitle = this.scene.add
-      .text(px + padX, py + padY, `${emoji} ${agent.def.name}`, {
-        fontSize: "12px",
-        color: "#3A2820",
-        fontStyle: "bold",
-      })
-      .setDepth(21);
-
-    // Log entries
-    const startY = py + titleH + padY;
-    entries.forEach((entry, i) => {
-      const elapsed = this.formatElapsed(entry.time);
-      const t = this.scene.add
-        .text(px + padX, startY + i * lineH, `${elapsed} ${entry.text}`, {
-          fontSize: "9px",
-          color: "#6B5040",
-          wordWrap: { width: panelW - padX * 2 },
-        })
-        .setDepth(21);
-      this.inspectTexts.push(t);
-    });
-
-    if (entries.length === 0) {
-      const t = this.scene.add
-        .text(px + padX, startY, "No activity yet", {
-          fontSize: "9px",
-          color: "#9B8B78",
-          fontStyle: "italic",
-        })
-        .setDepth(21);
-      this.inspectTexts.push(t);
-    }
-  }
-
-  /** Update inspect panel position to follow the agent each frame */
-  tickInspectPanel(): void {
-    if (!this.inspectedAgent || !this.inspectBg) return;
-    // Re-render at new position (panels are small, this is fine per-frame)
-    this.renderInspectPanel();
-  }
-
-  private formatElapsed(time: number): string {
-    const secs = Math.floor((Date.now() - time) / 1000);
-    if (secs < 5) return "now";
-    if (secs < 60) return `${secs}s`;
-    const mins = Math.floor(secs / 60);
-    return `${mins}m`;
-  }
+  /** No-op — inspect panel is now a React component */
+  tickInspectPanel(): void {}
 
   // =========================================================================
   // Feature 3: Handoff connection lines between agents

@@ -5,11 +5,19 @@ type EventHandler = (ev: WSEvent) => void;
 type IntentHandler = (ev: AgentIntentEvent) => void;
 type GateHandler = (ev: GateRequestedEvent) => void;
 
+export interface GateResponse {
+  agentName: string;
+  action: "approve" | "reject";
+  note: string;
+}
+type GateResponseHandler = (ev: GateResponse) => void;
+
 class WSClient {
   private ws: WebSocket | null = null;
   private eventHandlers: Set<EventHandler> = new Set();
   private intentHandlers: Set<IntentHandler> = new Set();
   private gateHandlers: Set<GateHandler> = new Set();
+  private gateResponseHandlers: Set<GateResponseHandler> = new Set();
 
   connect(runId: string): void {
     this.disconnect();
@@ -45,22 +53,31 @@ class WSClient {
     this.ws = null;
   }
 
+  /** Emit a local-only gate response (not sent over WS) */
+  emitGateResponse(response: GateResponse): void {
+    this.gateResponseHandlers.forEach((h) => h(response));
+  }
+
   on(type: "event", handler: EventHandler): void;
   on(type: "intent", handler: IntentHandler): void;
   on(type: "gate", handler: GateHandler): void;
-  on(type: string, handler: EventHandler | IntentHandler | GateHandler): void {
+  on(type: "gate-response", handler: GateResponseHandler): void;
+  on(type: string, handler: EventHandler | IntentHandler | GateHandler | GateResponseHandler): void {
     if (type === "event") this.eventHandlers.add(handler as EventHandler);
     if (type === "intent") this.intentHandlers.add(handler as IntentHandler);
     if (type === "gate") this.gateHandlers.add(handler as GateHandler);
+    if (type === "gate-response") this.gateResponseHandlers.add(handler as GateResponseHandler);
   }
 
   off(type: "event", handler: EventHandler): void;
   off(type: "intent", handler: IntentHandler): void;
   off(type: "gate", handler: GateHandler): void;
-  off(type: string, handler: EventHandler | IntentHandler | GateHandler): void {
+  off(type: "gate-response", handler: GateResponseHandler): void;
+  off(type: string, handler: EventHandler | IntentHandler | GateHandler | GateResponseHandler): void {
     if (type === "event") this.eventHandlers.delete(handler as EventHandler);
     if (type === "intent") this.intentHandlers.delete(handler as IntentHandler);
     if (type === "gate") this.gateHandlers.delete(handler as GateHandler);
+    if (type === "gate-response") this.gateResponseHandlers.delete(handler as GateResponseHandler);
   }
 }
 

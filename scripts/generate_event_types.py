@@ -42,6 +42,7 @@ _EVENT_CLASSES = [
     "GateRecommendedEvent",
     "AgentActivityEvent",
     "TaskHandoffEvent",
+    "FinalOutputEvent",
 ]
 
 # Type alias literals defined at module level

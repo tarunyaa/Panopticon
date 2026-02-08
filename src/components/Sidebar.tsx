@@ -38,14 +38,10 @@ export function Sidebar() {
   const canAdd = agents.length < maxAgents;
 
   return (
-    <div className="w-[320px] h-full flex flex-col pixel-panel pixel-dither font-pixel">
+    <div className="w-[260px] h-full flex flex-col pixel-panel pixel-dither font-pixel">
       {/* Title bar */}
-      <div className="px-3 py-2 flex items-center gap-2 bg-wood-dark text-parchment-light">
-        <img src="/assets/logo.png" alt="Panopticon" className="h-10 w-10" style={{ imageRendering: "pixelated" }} />
-        <span className="text-[10px] tracking-widest uppercase">
-          Panopticon
-        </span>
-        <span className="text-[8px] opacity-50 ml-auto">v1</span>
+      <div className="px-3 py-2 flex items-center justify-center bg-wood-dark text-parchment-light">
+        <img src="/assets/logo.png" alt="Panopticon" className="h-20 w-20" style={{ imageRendering: "pixelated" }} />
       </div>
 
       {/* Scrollable content area */}

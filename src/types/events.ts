@@ -47,7 +47,7 @@ export interface GateRequestedEvent {
   question: string;
   context: string;
   reason: string;
-  gateSource: "task_complete" | "file_operation" | "terminal_command" | "leader_request";
+  gateSource: string;
 }
 
 export interface GateRecommendedEvent {
@@ -63,9 +63,8 @@ export interface GateRecommendedEvent {
 export interface AgentActivityEvent {
   type: "AGENT_ACTIVITY";
   agentName: string;
-  activity: "idle" | "tool_call" | "llm_generating" | "planning";
+  activity: "idle" | "tool_call" | "llm_generating" | "planning" | "done";
   details: string;
-  toolName?: string;
 }
 
 export interface TaskHandoffEvent {
@@ -73,6 +72,11 @@ export interface TaskHandoffEvent {
   receivingAgent: string;
   sourceAgents: string[];
   summary: string;
+}
+
+export interface FinalOutputEvent {
+  type: "FINAL_OUTPUT";
+  output: string;
 }
 
 export interface WorldSnapshotEvent {
@@ -91,4 +95,5 @@ export type WSEvent =
   | GateRecommendedEvent
   | AgentActivityEvent
   | TaskHandoffEvent
+  | FinalOutputEvent
   | WorldSnapshotEvent;

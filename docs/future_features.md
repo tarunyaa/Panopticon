@@ -969,10 +969,1335 @@ These parts of Panopticon work regardless of framework and need no changes:
 | 11C-E | Framework-Agnostic (CrewAI/AutoGen/UI) | High | Feature 11A-B |
 | 5 | Multi-Village & Marketplace | High | Features 1, 2, 8 |
 
-Recommended order: **10 → 1 → 7 → 9A → 4 → 2 → 9B → 3 → 6 → 11A-B → 8 → 9C → 11C-E → 5**
+Recommended order: **10 → 1 → 7 → 9A → 4 → 2 → 9B → 3 → 6 → 11A-B → 8 → 9C → 11C-E → 5 → 12 → 13 → 14**
 
 Feature 8 is phased internally: **8A (presets)** can ship early alongside Feature 2. **8B (drag-to-customize)** and **8C (evolution)** are the longer tail. **8D (deep behavior integration)** is the final payoff that ties everything together.
 
 Feature 9 is also phased: **9A (routing)** is a quick win that can ship very early. **9B (new tools)** is ongoing. **9C (capability gating)** requires Feature 8.
 
 Feature 11 is phased: **11A-B (contract + adapter refactor)** is the important architectural work. **11C-E (additional adapters + UI)** are incremental after that.
+
+---
+
+## 12. Robust Memory Persistence — Cross-Workflow Context Retention
+
+**Goal**: Agents retain context not just within a single run, but across multi-step workflows and sequential runs. An agent that researched a topic in Run 1 remembers its findings in Run 2 without re-doing the work. Memory is structured, queryable, and scoped — agents carry a persistent "working memory" that survives beyond the run lifecycle.
+
+### How It Differs from Feature 1 (Zone-Based Memory)
+
+Feature 1 gives each **building** a memory store (Library stores research, Workshop stores artifacts). Feature 12 gives each **agent** a persistent identity with structured memory that follows them across runs, teams, and even villages. Zone memory is *where* knowledge lives. Agent memory is *who* knows it.
+
+### Current State
+- All agent context is lost when a run ends — `create_react_agent` starts fresh each time
+- Gate feedback is appended inline but not persisted (`graph.py:206-208`)
+- `MemorySaver` checkpoints exist only for mid-run interrupt/resume, not cross-run persistence
+- No embedding store, no retrieval-augmented agent prompting
+
+### Memory Architecture
+
+```
+backend/agent_memory/
+  {agent_id}/
+    profile.json          # Agent identity: role, strengths, preferences learned over time
+    episodic/             # Run-by-run memory (what happened)
+      run_{id}.md         # Summary of what the agent did, tools used, outcomes
+    semantic/             # Factual knowledge (what the agent knows)
+      knowledge.jsonl     # Extracted facts, entities, relationships from past work
+    procedural/           # How-to knowledge (how the agent works)
+      strategies.md       # Successful strategies, failed approaches, learned heuristics
+    working/              # Current workflow state (active across a multi-step workflow)
+      context.json        # Scratchpad for multi-step workflows — carries forward between runs
+```
+
+### Implementation Plan
+
+**Backend — Memory Store**:
+1. **Episodic memory**: After each run, generate a structured summary of what the agent did (tasks completed, tools used, key findings, user feedback received). Store as `episodic/run_{id}.md`. Use LLM summarization to compress raw output into concise memory entries
+2. **Semantic memory**: Extract factual knowledge from agent outputs using entity extraction. Store as JSONL entries: `{"fact": "...", "source_run": "...", "confidence": 0.9, "timestamp": "..."}`. Queryable by keyword or embedding similarity
+3. **Procedural memory**: After gate feedback (especially rejections or corrections), extract a lesson: "When writing blog posts, always include sources" → stored in `strategies.md`. Over time, agents learn from user preferences
+4. **Working memory (cross-run scratchpad)**: For multi-step workflows (e.g., "Research → Draft → Review → Publish"), the agent's working context persists between runs. A `context.json` holds the current workflow state, intermediate results, and what still needs to be done. The next run picks up where the last one left off
+5. **Memory injection into system prompt**: At agent creation time in `make_worker_node()`, load relevant memories and inject into the system message:
+   ```
+   ## Your Memory
+   ### Recent experience (last 3 runs)
+   {episodic summaries}
+   ### Things you know
+   {top-K relevant semantic facts, retrieved by embedding similarity to current task}
+   ### Lessons learned
+   {procedural strategies}
+   ### Current workflow state
+   {working memory context, if part of a multi-step workflow}
+   ```
+6. **Memory budget & summarization**: Cap injected memory at ~2000 tokens. Use recency + relevance scoring to pick the most useful memories. Older episodic memories get progressively summarized (daily → weekly → monthly summaries)
+7. **REST endpoints**:
+   - `GET /agents/{id}/memory` — full memory dump for an agent
+   - `GET /agents/{id}/memory/episodic` — run history
+   - `GET /agents/{id}/memory/semantic?query=...` — search factual knowledge
+   - `DELETE /agents/{id}/memory` — wipe an agent's memory (fresh start)
+   - `POST /agents/{id}/memory/teach` — manually inject a fact or strategy into an agent's memory
+
+**Frontend**:
+8. **Memory panel in AgentCard**: Expandable section showing the agent's memory stats (runs remembered, facts stored, lessons learned) with drill-down views
+9. **"Teach" button**: Lets the user manually add knowledge to an agent's memory without running a task
+10. **Memory indicator**: Visual badge on agent sprites showing memory depth (new agent vs experienced agent)
+
+**Files touched**: `graph.py`, `main.py`, `planner.py`, `AgentCard.tsx`, `Sidebar.tsx`
+**New files**: `backend/agent_memory/` (directory tree), `backend/memory_manager.py` (load/save/query/summarize logic)
+
+---
+
+## 13. Context-Aware Reasoning Engine
+
+**Goal**: Replace the default single-pass LLM invocation with a structured reasoning engine that gives agents the ability to plan, reflect, and self-correct before producing output. Agents don't just react — they think step-by-step, evaluate their own work, and adapt their approach based on task complexity and past performance.
+
+### Current State
+- Agents use `create_react_agent` which follows the basic ReAct loop: think → act → observe → repeat
+- No explicit planning phase — the agent jumps straight into tool calls
+- No self-evaluation — the agent's first output is the final output (unless gated)
+- No complexity-aware routing — simple and complex tasks get the same treatment
+- The only "reasoning" control is model selection (Feature 7) — no structural reasoning improvements
+
+### Reasoning Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│            Reasoning Engine                  │
+│                                              │
+│  1. CLASSIFY → assess task complexity        │
+│  2. PLAN    → decompose into sub-steps       │
+│  3. EXECUTE → run sub-steps (ReAct loop)     │
+│  4. REFLECT → evaluate output quality        │
+│  5. REVISE  → self-correct if needed         │
+│  6. DELIVER → produce final output           │
+└─────────────────────────────────────────────┘
+```
+
+### Implementation Plan
+
+**Backend — Reasoning Pipeline**:
+1. **Task complexity classifier**: Before an agent starts work, classify the task into complexity tiers:
+   - **Simple** (Tier 1): Direct lookup, single tool call, factual answer → skip planning, go straight to ReAct
+   - **Moderate** (Tier 2): Multi-step but straightforward → lightweight plan, then execute
+   - **Complex** (Tier 3): Ambiguous, multi-faceted, requires synthesis → full planning + reflection loop
+   Classification uses a fast LLM call (Haiku) with the task description + agent role as input. Output is a tier + reasoning
+
+2. **Planning phase**: For Tier 2+ tasks, the agent generates an explicit step-by-step plan before acting:
+   ```
+   System: Before executing this task, create a plan.
+   - Break the task into 2-5 concrete sub-steps
+   - For each sub-step, identify which tool(s) you'll need
+   - Identify potential failure points and fallback strategies
+   ```
+   The plan is stored in working memory (Feature 12) and emitted as an `AGENT_INTENT` event so the frontend can display it
+
+3. **Structured execution**: Instead of a single `create_react_agent` invocation, Tier 2+ tasks execute sub-steps sequentially. Each sub-step is a mini ReAct loop with its own tool access. Between sub-steps, the engine checks:
+   - Did the sub-step produce the expected output?
+   - Should the plan be revised based on what was learned?
+   - Is the agent stuck in a loop (same tool call repeated 3+ times)?
+
+4. **Reflection phase**: After execution completes, Tier 3 tasks go through a self-evaluation step:
+   ```
+   System: Review your output against the original task.
+   - Does it fully address the task requirements?
+   - Are there gaps, errors, or unsupported claims?
+   - Rate your confidence (1-5) and explain why.
+   - If confidence < 4, identify what would improve the output.
+   ```
+   Reflection output is logged and, if confidence is low, triggers a revision pass
+
+5. **Revision loop**: If reflection identifies issues, the agent re-executes specific sub-steps with the reflection feedback injected. Maximum 2 revision passes to prevent infinite loops. Each revision is emitted as an `AGENT_ACTIVITY` event
+
+6. **Context-aware tool selection**: The reasoning engine considers the agent's past performance with each tool (from Feature 12's procedural memory) when planning:
+   - If `web_search` consistently returned poor results for this type of query, suggest `web_scraper` with a specific URL instead
+   - If `terminal` commands frequently failed, suggest more defensive command construction
+   - This is injected into the planning prompt as "Tool performance notes"
+
+7. **Reasoning mode per agent**: Add a `reasoning_mode` field to agents.yaml:
+   ```yaml
+   reviewer:
+     role: QA Reviewer
+     reasoning_mode: thorough    # always uses full planning + reflection
+   researcher:
+     role: Researcher
+     reasoning_mode: adaptive    # auto-classifies complexity (default)
+   formatter:
+     role: Formatter
+     reasoning_mode: fast        # always skips planning, straight to ReAct
+   ```
+
+**Frontend — Reasoning Visibility**:
+8. **Plan display**: When an agent emits a plan, show it in the EventFeed as a numbered checklist. As sub-steps complete, check them off in real-time
+9. **Reflection display**: Show the agent's self-evaluation in a collapsible section of the task summary. Confidence score shown as a badge (green/yellow/red)
+10. **Revision indicator**: If an agent enters a revision loop, show a visual indicator (e.g., agent sprite walks back to Workshop from Dorm, "rethinking" animation)
+
+**Files touched**: `graph.py` (reasoning wrapper around `create_react_agent`), `main.py` (new event subtypes), `events.py`, `planner.py` (reasoning_mode in agent config), `EventFeed.tsx`, `VillageScene.ts`
+**New files**: `backend/reasoning.py` (classifier, planner, reflector, revision logic)
+
+---
+
+## 14. Agent Skills Database — Automatic Skill Matching
+
+**Goal**: Each agent has access to a curated database of skills (`skills.md` files) that define reusable capabilities — prompt templates, tool combinations, and domain-specific knowledge. When a task is assigned, the system automatically matches the agent to the most relevant skills from the database, augmenting the agent's system prompt with proven techniques.
+
+### Core Concept
+
+A **skill** is a reusable, composable unit of agent capability:
+
+```yaml
+# skills/seo_blog_writing.yaml
+id: seo_blog_writing
+name: SEO Blog Writing
+category: content
+description: Write blog posts optimized for search engines
+triggers:
+  - "blog post"
+  - "SEO"
+  - "content writing"
+  - "article"
+tools_required:
+  - web_search
+  - file_writer
+prompt_template: |
+  When writing blog content, follow these SEO best practices:
+  - Include the target keyword in the title, first paragraph, and 2-3 subheadings
+  - Write meta descriptions under 160 characters
+  - Use short paragraphs (2-3 sentences) and bullet points for scannability
+  - Include internal and external links
+  - Aim for 1500-2500 words for pillar content
+  - Structure with H2/H3 headings every 200-300 words
+examples:
+  - input: "Write a blog post about AI agent frameworks"
+    key_points: ["Compare top 3 frameworks", "Include code examples", "SEO-optimized headings"]
+compatible_roles:
+  - writer
+  - content_strategist
+  - marketer
+```
+
+### Skills Database Structure
+
+```
+backend/skills/
+  _index.yaml                  # Master index: skill IDs, categories, trigger keywords
+  content/
+    seo_blog_writing.yaml
+    social_media_copy.yaml
+    email_campaign.yaml
+    technical_writing.yaml
+  research/
+    competitive_analysis.yaml
+    market_research.yaml
+    academic_review.yaml
+    data_gathering.yaml
+  engineering/
+    code_review.yaml
+    api_design.yaml
+    debugging.yaml
+    test_writing.yaml
+  analysis/
+    data_analysis.yaml
+    financial_modeling.yaml
+    report_generation.yaml
+  communication/
+    stakeholder_update.yaml
+    meeting_summary.yaml
+    proposal_writing.yaml
+```
+
+### Implementation Plan
+
+**Backend — Skills Registry**:
+1. **Skill schema**: Define a Pydantic model for skills:
+   ```python
+   class Skill(BaseModel):
+       id: str
+       name: str
+       category: str
+       description: str
+       triggers: list[str]           # keywords that activate this skill
+       tools_required: list[str]     # tools the agent needs to use this skill
+       prompt_template: str          # injected into the agent's system prompt
+       examples: list[dict] = []     # few-shot examples
+       compatible_roles: list[str]   # which agent roles benefit from this skill
+       version: str = "1.0"
+   ```
+2. **Skills loader**: `backend/skills_registry.py` that:
+   - Scans `backend/skills/` directory and loads all YAML skill files
+   - Builds an in-memory index by category, trigger keywords, and compatible roles
+   - Provides `search_skills(query: str, role: str) -> list[Skill]` using keyword matching + optional embedding similarity
+3. **Automatic skill matching**: When `make_worker_node()` creates an agent, the skills registry is queried:
+   - Input: the agent's role + the task description
+   - Matching logic: (a) keyword overlap between task description and skill triggers, (b) role compatibility, (c) tool overlap between agent's assigned tools and skill's required tools
+   - Top 1-3 matching skills are selected and their `prompt_template` is injected into the agent's system prompt under a `## Active Skills` section
+4. **Skill-tool auto-connection**: If a matched skill requires tools the agent doesn't have, the system can either:
+   - **Auto-add**: Automatically grant the agent the required tools (if available in the tool registry)
+   - **Warn**: Flag in the delegation plan that the agent is missing tools for an activated skill
+   - Configurable via a `skill_tool_policy: auto | warn | ignore` setting
+5. **Leader skill awareness**: Update `planner.py` so the leader can see available skills when planning the team. The leader's system prompt includes a skill summary:
+   ```
+   ## Available Skills
+   - seo_blog_writing (content): SEO-optimized blog writing [tools: web_search, file_writer]
+   - competitive_analysis (research): Market competitor analysis [tools: web_search, web_scraper, data_analyzer]
+   - code_review (engineering): Structured code review [tools: file_reader, git_status, linter]
+   ...
+   ```
+   The leader can explicitly assign skills to agents in the delegation plan, or let automatic matching handle it
+
+**Backend — Custom & Learned Skills**:
+6. **User-defined skills**: Users can create custom skills via `POST /skills` with a YAML body. Custom skills are stored in `backend/skills/custom/` and indexed alongside built-in skills
+7. **Skill learning from runs** (ties into Features 12 & 13): After a successful run (user approved at gate, high reflection confidence), the system can extract a new skill from the agent's behavior:
+   - Identify the prompt patterns, tool sequences, and strategies that worked
+   - Generate a draft skill YAML using LLM summarization
+   - Present to the user for approval: "Your researcher used a 3-step approach for competitive analysis. Save as a skill?"
+   - Approved skills are added to `backend/skills/learned/`
+
+**REST Endpoints**:
+8. - `GET /skills` — list all available skills (filterable by category, role)
+   - `GET /skills/{id}` — get a specific skill's full definition
+   - `POST /skills` — create a custom skill
+   - `PUT /skills/{id}` — update a skill
+   - `DELETE /skills/{id}` — delete a custom/learned skill (built-in skills cannot be deleted)
+   - `GET /skills/match?task=...&role=...` — preview which skills would be auto-matched for a given task + role
+
+**Frontend**:
+9. **Skills browser**: A new panel (accessible from sidebar or onboarding) showing all available skills organized by category. Each skill card shows name, description, required tools, and compatible roles
+10. **Skill assignment in team planning**: During the `review` phase of `TeamPlanScreen.tsx`, show which skills were auto-matched to each agent. The user can add/remove skills before entering the village
+11. **Active skills indicator**: In `AgentCard.tsx`, show badges for the skills currently active on each agent. Clicking a badge shows the skill's prompt template
+12. **Skill creation wizard**: A form for creating custom skills — name, triggers, prompt template, tool requirements. Includes a "Test" button that runs a sample task with the skill applied
+
+### Per-Agent skills.md
+
+Each agent can also have a personal `skills.md` file that tracks their specialized capabilities:
+
+```
+backend/agent_memory/{agent_id}/skills.md
+```
+
+This file is auto-generated from:
+- Skills explicitly assigned by the leader or user
+- Skills auto-matched during runs
+- Skills learned from successful runs (Feature 12 + 13 integration)
+
+Format:
+```markdown
+# Skills — {Agent Name}
+
+## Active Skills
+- **SEO Blog Writing** (v1.0) — matched via task keywords
+- **Competitive Analysis** (v1.2) — assigned by leader
+
+## Skill History
+- Used "SEO Blog Writing" in 3 runs (last: 2024-12-15) — avg confidence: 4.2/5
+- Used "Data Gathering" in 1 run (last: 2024-12-10) — avg confidence: 3.8/5
+
+## Learned Techniques
+- When doing competitive analysis, always check Crunchbase before general web search
+- For blog posts, generate outline first, then fill sections (learned from Run #12 feedback)
+```
+
+This file is injected into the agent's system prompt alongside the skill templates, giving the agent a sense of its own expertise and track record.
+
+**Files touched**: `graph.py` (skill injection in `make_worker_node()`), `planner.py` (leader skill awareness), `main.py` (skill endpoints), `leader_rules.md` (skill assignment guidance), `AgentCard.tsx`, `TeamPlanScreen.tsx`, `Sidebar.tsx`
+**New files**: `backend/skills/` (directory tree with YAML skill definitions), `backend/skills_registry.py` (loader, indexer, matcher), `src/components/SkillsBrowser.tsx`
+
+---
+
+## 15. Conversational Multi-Agent Collaboration
+
+**Goal**: Replace the current "parallel solo work" model — where agents execute independently and only share outputs at task boundaries — with a conversational model where agents actively discuss, debate, critique, and build on each other's work in real-time. Agents meet at the Cafe to talk through problems together instead of silently producing outputs in isolated Workshop silos.
+
+### The Problem with Parallel Solo Work
+
+Currently, agents fan out from START, each takes a task, works alone in a ReAct loop, produces output, and fans back in. The only inter-agent communication is:
+- **Dependency context**: Downstream agents see upstream outputs as static text injected into their prompt (`context_parts` in `graph.py`)
+- **Synthesis**: `synthesize_node` merges outputs at the very end via a single LLM call
+
+This is like a team where everyone works in separate rooms and only meets for a final read-out. It misses:
+- An engineer asking a researcher to clarify a finding mid-task
+- A reviewer challenging an assumption before the draft is finished
+- Two agents realizing they're duplicating effort and splitting the work
+- An agent requesting help when stuck on a sub-problem
+
+### Current State
+- `build_execution_graph()` creates isolated worker nodes connected by explicit dependency edges
+- Workers only see upstream outputs via `context_parts` — no back-and-forth
+- No shared "conversation space" — agents can't address each other
+- `synthesize_node` does a one-shot merge at the end, not an iterative discussion
+- The Cafe zone exists visually but has no functional role beyond handoff animations
+- LangGraph supports message-passing between nodes but the graph is structured as a DAG, not a conversation loop
+
+### Conversation Architecture
+
+```
+                  ┌──────────────────────────┐
+                  │     Conversation Bus      │
+                  │  (shared message stream)   │
+                  └──┬─────┬─────┬─────┬─────┘
+                     │     │     │     │
+                  ┌──▼──┐ ┌▼───┐ ┌▼───┐ ┌▼───┐
+                  │Agent│ │Agt │ │Agt │ │Agt │
+                  │  A  │ │ B  │ │ C  │ │ D  │
+                  └─────┘ └────┘ └────┘ └────┘
+
+Modes:
+1. SOLO      — current behavior, no conversation (default for simple tasks)
+2. CONSULT   — agents can ask specific agents questions mid-task
+3. ROUNDTABLE — all agents discuss a topic before/after work phases
+4. DEBATE    — two agents argue opposing positions, a third judges
+```
+
+### Implementation Plan
+
+#### Phase 15A — Conversation Bus (Infrastructure)
+
+Build the message-passing backbone that enables any conversation pattern.
+
+1. **Conversation state**: Add a shared conversation log to the graph state:
+   ```python
+   class ConversationMessage(TypedDict):
+       id: str
+       from_agent: str
+       to_agent: str | None     # None = broadcast to all
+       content: str
+       message_type: str        # "question", "answer", "critique", "suggestion", "agreement"
+       timestamp: float
+       in_reply_to: str | None  # thread support
+
+   class GraphState(TypedDict):
+       task: str
+       task_outputs: Annotated[list[TaskOutput], operator.add]
+       conversation: Annotated[list[ConversationMessage], operator.add]  # NEW
+   ```
+
+2. **Conversation tool**: Give agents a `send_message` tool that writes to the conversation state:
+   ```python
+   @tool
+   def send_message(to: str | None, content: str, message_type: str = "message") -> str:
+       """Send a message to another agent (or broadcast to all).
+       Use this to ask questions, share findings, request feedback, or coordinate work.
+       - to: agent name, or None to broadcast
+       - message_type: question | answer | critique | suggestion | update
+       """
+   ```
+   The tool appends a `ConversationMessage` to state and returns a confirmation. The addressed agent sees the message on their next ReAct iteration.
+
+3. **Message delivery**: When a worker node runs, before each ReAct step, check `state["conversation"]` for new messages addressed to this agent. Inject unread messages into the agent's context:
+   ```
+   ## Incoming Messages
+   [From Researcher]: "I found conflicting data on market size — $2B from Statista vs $3.5B from Gartner. Which should I use for the report?"
+   ```
+   The agent can then respond via `send_message` or adjust their work based on the input.
+
+4. **WebSocket events for conversation**: Emit a new `AGENT_CONVERSATION` event when agents message each other:
+   ```json
+   {
+     "type": "AGENT_CONVERSATION",
+     "from": "Researcher",
+     "to": "Analyst",
+     "content": "I found conflicting data on market size...",
+     "messageType": "question"
+   }
+   ```
+   This enables the frontend to show agent-to-agent chat in real time.
+
+#### Phase 15B — Conversation Modes
+
+Different task types benefit from different collaboration patterns. The leader selects the mode during planning.
+
+5. **CONSULT mode** (lightweight — default for Tier 2+ tasks):
+   - Agents work on their tasks independently but have access to `send_message`
+   - Messages are delivered asynchronously — the sender doesn't block waiting for a reply
+   - Best for: teams where agents mostly work alone but occasionally need to coordinate
+   - Graph structure: same parallel fan-out as today, but conversation state is shared
+   - Example flow:
+     ```
+     Writer starts drafting → realizes they need a stat →
+       sends "What's the latest user count?" to Researcher →
+       continues drafting with placeholder →
+     Researcher sees message → responds with "4.2M MAU as of Q3" →
+     Writer sees response → fills in the stat
+     ```
+
+6. **ROUNDTABLE mode** (structured discussion phases):
+   - Before work begins, all agents enter a discussion phase at the Cafe zone
+   - The discussion has a structured format:
+     - **Round 1 — Understanding**: Each agent states their understanding of the task and their planned approach (1 message each)
+     - **Round 2 — Coordination**: Agents identify overlaps, gaps, and dependencies. They agree on who does what and what format outputs should take (open discussion, 2-3 rounds)
+     - **Round 3 — Questions**: Agents ask clarifying questions to each other (open, until no more questions)
+   - After discussion, agents execute their tasks (with CONSULT mode active for mid-work questions)
+   - After execution, a second roundtable reviews outputs:
+     - **Round 4 — Review**: Each agent presents their output summary. Others can critique, ask for changes, or approve
+     - **Round 5 — Integration**: Agents discuss how to combine outputs. Replaces the current `synthesize_node` one-shot merge
+   - Graph structure: `discussion_node` (all agents in a loop) → `work_phase` (parallel fan-out) → `review_node` (all agents in a loop) → END
+   - The discussion nodes use a multi-agent conversation loop: each agent gets a turn to speak, seeing all previous messages. The loop ends when all agents signal "ready to proceed" or after a max round count
+
+7. **DEBATE mode** (adversarial reasoning):
+   - Two agents take opposing positions on a question. A third agent (or the user) judges
+   - Useful for: decision-making tasks, risk assessment, strategy evaluation
+   - Structure:
+     - **Proposition**: Agent A presents their position
+     - **Opposition**: Agent B critiques and presents the counter-position
+     - **Rebuttal**: Agent A responds to critiques
+     - **Counter-rebuttal**: Agent B responds
+     - **Judgment**: Agent C (or user via gate) evaluates both positions and makes a decision
+   - Graph structure: `debate_node` with alternating agent turns, then `judge_node`
+   - Example: "Should we use microservices or a monolith?" — Architect A argues microservices, Architect B argues monolith, Tech Lead judges
+
+8. **Leader selects mode**: Update `planner.py` so the leader's delegation plan includes a `collaboration_mode` field:
+   ```yaml
+   collaboration_mode: roundtable    # solo | consult | roundtable | debate
+   debate_config:                     # only if mode is "debate"
+     proposition_agent: optimist
+     opposition_agent: skeptic
+     judge_agent: strategist
+     topic: "Should we pursue the enterprise market?"
+   ```
+   Update `leader_rules.md` with guidance on when to use each mode:
+   - **Solo**: Simple, independent tasks with no cross-agent dependencies
+   - **Consult**: Default for most multi-agent tasks. Low overhead, agents ask for help when needed
+   - **Roundtable**: Complex tasks requiring tight coordination, shared understanding, or multi-perspective review
+   - **Debate**: Decision-making tasks where exploring trade-offs is valuable
+
+#### Phase 15C — Village Visualization
+
+Make agent conversations visible and spatial in the village.
+
+9. **Cafe as conversation hub**: When agents are in CONSULT/ROUNDTABLE/DEBATE mode, their sprites gather at the Cafe zone. Show speech bubbles with abbreviated message content floating above sprites:
+   ```
+   [Researcher sprite]: "Market size: $2B or $3.5B?"
+   [Analyst sprite]: "Use Gartner — more recent"
+   ```
+   Speech bubbles use pixel-art chat bubble sprites with truncated text (max 40 chars). Full message visible on hover.
+
+10. **Conversation feed in sidebar**: A new "Conversation" tab in the sidebar (alongside EventFeed) showing the full agent-to-agent chat log. Messages are threaded, color-coded by agent, and tagged by type (question, critique, etc.). The user can read the full discussion to understand how agents coordinated.
+
+11. **Walking to consult**: In CONSULT mode, when Agent A sends a message to Agent B, Agent A's sprite walks to Agent B's current location (or they both walk to the Cafe). This creates a natural visual of agents "meeting" to discuss. After the exchange, they walk back to their respective work zones.
+
+12. **Roundtable formation**: In ROUNDTABLE mode, all agent sprites gather in a circle formation at the Cafe. During each agent's "turn" to speak, their sprite gets a subtle highlight or speech animation. Between discussion and work phases, agents walk from Cafe to Workshop and back.
+
+13. **Debate visualization**: In DEBATE mode, the two debating agents face each other at the Cafe. The judge agent stands between them. Each argument is shown as a speech bubble alternating sides. A "score" or argument-strength indicator could show which side is "winning" based on the judge's interim assessments.
+
+#### Phase 15D — Conversation Quality & Control
+
+14. **Conversation budget**: Set a max message count per conversation mode to prevent agents from chatting forever:
+    - CONSULT: max 3 messages per agent pair per task
+    - ROUNDTABLE: max 5 rounds per phase (understanding, coordination, review)
+    - DEBATE: max 4 exchanges (proposition, opposition, rebuttal, counter-rebuttal) + judgment
+    Configurable in the delegation plan or via a global setting
+
+15. **Conversation relevance filter**: Before delivering a message, check if it's substantive (not just "Thanks!" or "Got it"). Use a lightweight LLM check or keyword heuristic. Trivial messages are logged but not delivered to reduce noise
+
+16. **User participation**: The user can join any conversation via the sidebar chat panel. User messages appear as `[You]` in the conversation stream and are injected into the addressed agent's context. This extends Feature 3 (Mid-Run Interruption) — instead of stopping an agent, the user can *talk to them* mid-task
+
+17. **Conversation memory**: Conversation logs are persisted in the Cafe zone memory (Feature 1) and in agent episodic memory (Feature 12). Agents remember past discussions: "In our last roundtable, we agreed to always validate data sources — I'll follow that approach"
+
+### How It Changes the Graph
+
+The graph structure adapts based on collaboration mode:
+
+```
+SOLO (current):
+  START → [Agent A] → [Agent B] → ... → synthesize → END
+                                        (parallel if no deps)
+
+CONSULT:
+  START → [Agent A + send_message tool] ─┐
+       → [Agent B + send_message tool] ─┤→ synthesize → END
+       → [Agent C + send_message tool] ─┘
+  (same fan-out, but shared conversation state enables mid-work messaging)
+
+ROUNDTABLE:
+  START → discussion_node → [Agent A] ─┐
+                          → [Agent B] ─┤→ review_node → END
+                          → [Agent C] ─┘
+  (discussion and review are multi-turn conversation loops at the Cafe)
+
+DEBATE:
+  START → debate_node(A vs B, judged by C) → END
+  (alternating turns with structured argument format)
+```
+
+### Value
+
+1. **Better outputs**: Agents catch each other's mistakes, fill knowledge gaps, and coordinate formats before producing final output — instead of discovering conflicts at synthesis time
+2. **Natural workflow**: Real teams don't work in isolation. They chat, ask questions, and review each other's drafts. This makes agent collaboration feel human
+3. **Transparency**: Users can read the conversation to understand *why* agents made certain decisions, not just *what* they produced
+4. **Village comes alive**: Agents walking to meet each other, gathering at the Cafe for roundtables, debating face-to-face — the village feels like a living workplace, not a set of parallel progress bars
+5. **Flexible collaboration**: Simple tasks stay fast (SOLO mode). Complex tasks get the coordination they need (ROUNDTABLE). Contentious decisions get rigorous analysis (DEBATE). The leader picks the right mode for each task
+
+**Files touched**: `graph.py` (conversation state, message delivery, new graph modes), `main.py` (new WS events, collaboration_mode in run config), `planner.py` (leader selects mode), `leader_rules.md` (mode guidance), `events.py` (AGENT_CONVERSATION event), `tools.py` (send_message tool), `VillageScene.ts` (speech bubbles, meeting animations), `AgentRegistry.ts` (conversation-aware zone targeting), `Sidebar.tsx` (conversation tab), `EventFeed.tsx`
+**New files**: `backend/conversation.py` (conversation bus, mode runners, message delivery), `src/components/ConversationFeed.tsx`, speech bubble sprite assets
+
+---
+
+## 16. Tile-Based Pathfinding & Interaction Animations
+
+**Goal**: Replace the current straight-line movement with proper A* pathfinding that navigates around buildings, walls, and furniture. When agents arrive at a destination, they play context-specific interaction animations — sitting at a laptop to code, pulling a book off a shelf to research, leaning over a workbench to draft. The village stops feeling like sprites sliding over a painting and starts feeling like characters *inhabiting* a space.
+
+### Current State — What We're Replacing
+
+**Movement** (`movement.ts`):
+- Agents move in **straight lines** from (x,y) to (targetX,targetY) at 360px/s
+- No pathfinding whatsoever — agents walk through walls, furniture, and other buildings
+- Arrival threshold is 4px, then velocity is set to 0
+- Direction is computed from raw dx/dy for animation selection (walk-up/down/left/right)
+
+**Animations** (`AgentRegistry.ts`):
+- Only **4 walk cycles** exist (up, down, left, right — 3 frames each at 6fps)
+- Idle state is a single static frame (frame 1) with a ±2px sine bob
+- No sitting, no object interaction, no gestures, no working poses
+- Activity is shown via floating emoji only (🔨 tool_call, 🧠 llm_generating, etc.)
+
+**Tilemap** (`VillageScene.ts`):
+- `the_ville_jan7.json` has a **Collisions** layer with `collide: true` tiles and a **Wall** layer
+- These layers are loaded and `setCollisionByProperty()` is called — but only for Arcade physics body blocking, not pathfinding
+- The map is 140x100 tiles (32px each = 4480x3200px world)
+- Multiple object/block layers exist in the Tiled file (Object Interaction Blocks, Arena Blocks, etc.) but are completely unused
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Pathfinding Layer                       │
+│                                                           │
+│  1. WALKABILITY GRID — binary grid from collision tiles   │
+│  2. A* PATHFINDER   — EasyStar.js or custom A*           │
+│  3. PATH SMOOTHER   — reduce jagged grid paths           │
+│  4. PATH FOLLOWER   — move sprite along waypoints        │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│                 Interaction Layer                          │
+│                                                           │
+│  1. INTERACTION POINTS — furniture with pose/offset data  │
+│  2. INTERACTION ANIMS  — sit, type, read, write, etc.    │
+│  3. ARRIVAL BEHAVIOR   — walk to point → play animation  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Implementation Plan
+
+#### Phase 16A — Walkability Grid & A* Pathfinding
+
+Build the pathfinding infrastructure so agents navigate around obstacles.
+
+1. **Extract walkability grid**: At scene creation time, after tilemap layers are loaded, build a 2D boolean grid (140x100) from the Collisions and Wall layers:
+   ```typescript
+   // In VillageScene.create(), after tilemap setup
+   const walkGrid: number[][] = [];
+   for (let y = 0; y < map.height; y++) {
+     walkGrid[y] = [];
+     for (let x = 0; x < map.width; x++) {
+       const collisionTile = collisionLayer.getTileAt(x, y);
+       const wallTile = wallLayer.getTileAt(x, y);
+       // 0 = walkable, 1 = blocked
+       walkGrid[y][x] = (collisionTile?.properties?.collide || wallTile) ? 1 : 0;
+     }
+   }
+   ```
+   Store the grid on the scene or in a dedicated `Pathfinder` system object.
+
+2. **A* pathfinder with EasyStar.js**: Use the [EasyStar.js](https://github.com/prettymuchbryce/easystarjs) library — a lightweight, async-capable A* implementation designed for tile grids:
+   ```typescript
+   import EasyStar from "easystarjs";
+
+   const finder = new EasyStar.js();
+   finder.setGrid(walkGrid);
+   finder.setAcceptableTiles([0]);          // only walk on non-blocked tiles
+   finder.enableDiagonals();                // allow 8-directional movement
+   finder.enableCornerCutting(false);       // don't cut through diagonal walls
+   finder.setIterationsPerCalculation(200); // budget per frame for async calc
+   ```
+   EasyStar runs asynchronously — call `finder.calculate()` each frame in `update()`, and it invokes a callback when the path is ready. This prevents frame drops on large maps.
+
+3. **Path request API**: Create `src/phaser/systems/Pathfinder.ts`:
+   ```typescript
+   export class Pathfinder {
+     private finder: EasyStar.js;
+     private tileSize: number;
+
+     constructor(walkGrid: number[][], tileSize: number) { ... }
+
+     /** Request a path from world coords to world coords. Returns a Promise of waypoints. */
+     findPath(fromX: number, fromY: number, toX: number, toY: number): Promise<{x: number, y: number}[]> {
+       const startTile = this.worldToTile(fromX, fromY);
+       const endTile = this.worldToTile(toX, toY);
+       return new Promise((resolve, reject) => {
+         this.finder.findPath(startTile.x, startTile.y, endTile.x, endTile.y, (path) => {
+           if (path === null) {
+             reject(new Error(`No path from (${fromX},${fromY}) to (${toX},${toY})`));
+           } else {
+             resolve(path.map(p => this.tileToWorld(p.x, p.y)));
+           }
+         });
+       });
+     }
+
+     /** Must be called every frame to process async pathfinding. */
+     update() { this.finder.calculate(); }
+   }
+   ```
+
+4. **Path smoothing**: Raw A* on a tile grid produces staircase paths (zigzag along tile edges). Apply a simple line-of-sight smoothing pass:
+   - Walk through the waypoint list
+   - For each waypoint, check if you can draw a straight line to waypoint N+2 without crossing a blocked tile (raycast against the walkability grid)
+   - If yes, remove the intermediate waypoint N+1
+   - Repeat until no more waypoints can be removed
+   This produces clean, natural-looking diagonal paths while still respecting obstacles.
+
+5. **Fallback for unreachable targets**: If A* returns no path (target is inside a wall, or areas are disconnected), fall back to the current straight-line movement. Log a warning. This keeps the system robust during development — no agent gets permanently stuck.
+
+#### Phase 16B — Path Following & Walk Animation
+
+Replace the straight-line `updateMovement()` with waypoint-following movement.
+
+6. **Path follower in AgentRegistry**: Each agent sprite gets a `currentPath: {x,y}[]` and `pathIndex: number`. Replace the direct (dx,dy) calculation in `updateMovement()`:
+   ```typescript
+   // Instead of: move directly toward (targetX, targetY)
+   // Now: move toward currentPath[pathIndex], advance index on arrival
+
+   if (!agent.currentPath || agent.pathIndex >= agent.currentPath.length) {
+     // Arrived at final destination or no path — stop
+     sprite.setVelocity(0, 0);
+     return;
+   }
+
+   const waypoint = agent.currentPath[agent.pathIndex];
+   const dx = waypoint.x - sprite.x;
+   const dy = waypoint.y - sprite.y;
+   const dist = Math.sqrt(dx * dx + dy * dy);
+
+   if (dist < 4) {
+     agent.pathIndex++;  // advance to next waypoint
+     return;             // will target next waypoint on next frame
+   }
+
+   // Move toward current waypoint at SPEED
+   const vx = (dx / dist) * SPEED;
+   const vy = (dy / dist) * SPEED;
+   sprite.setVelocity(vx, vy);
+
+   // Play walk animation based on dominant direction
+   playWalkAnim(sprite, dx, dy);
+   ```
+
+7. **Integrate path requests into setTarget()**: When `AgentRegistry.setTarget(agentName, zone)` is called, instead of just setting `targetX/targetY`, request a path:
+   ```typescript
+   async setTarget(agentName: string, zone: string) {
+     const agent = this.agents.get(agentName);
+     const target = this.getZonePosition(zone, agentIndex);
+     try {
+       agent.currentPath = await this.pathfinder.findPath(
+         agent.sprite.x, agent.sprite.y, target.x, target.y
+       );
+       agent.pathIndex = 0;
+     } catch {
+       // Fallback: straight-line
+       agent.currentPath = [{ x: target.x, y: target.y }];
+       agent.pathIndex = 0;
+     }
+   }
+   ```
+
+8. **Direction transitions**: With multi-waypoint paths, agents change direction at each turn. Ensure walk animations transition smoothly — when the dominant direction changes between waypoints, switch animation without a jarring snap. A simple approach: only change animation when the new direction is sustained for at least 2 frames.
+
+9. **Debug visualization** (dev mode only): Optional path rendering — draw thin lines or dots along the agent's current path using Phaser Graphics. Toggle with a debug key. Invaluable for tuning the walkability grid and seeing where agents are routing.
+
+#### Phase 16C — Interaction Points & Furniture Data
+
+Define where on the map agents can interact with objects, and what interaction looks like at each point.
+
+10. **Interaction point data**: Create `src/data/interaction_points.json` — a registry of furniture/object locations where agents can perform specific activities:
+    ```json
+    {
+      "points": [
+        {
+          "id": "workshop_laptop_1",
+          "zone": "WORKSHOP",
+          "tileX": 78, "tileY": 48,
+          "worldX": 2496, "worldY": 1536,
+          "type": "laptop",
+          "facing": "up",
+          "animation": "sit_type",
+          "activity": ["tool_call", "llm_generating"]
+        },
+        {
+          "id": "workshop_laptop_2",
+          "zone": "WORKSHOP",
+          "tileX": 80, "tileY": 48,
+          "worldX": 2560, "worldY": 1536,
+          "type": "laptop",
+          "facing": "up",
+          "animation": "sit_type",
+          "activity": ["tool_call", "llm_generating"]
+        },
+        {
+          "id": "library_bookshelf_1",
+          "zone": "LIBRARY",
+          "tileX": 66, "tileY": 25,
+          "worldX": 2112, "worldY": 800,
+          "type": "bookshelf",
+          "facing": "left",
+          "animation": "stand_read",
+          "activity": ["tool_call"]
+        },
+        {
+          "id": "cafe_table_1",
+          "zone": "CAFE",
+          "tileX": 79, "tileY": 26,
+          "worldX": 2528, "worldY": 832,
+          "type": "table",
+          "facing": "down",
+          "animation": "sit_talk",
+          "activity": ["idle", "planning"]
+        },
+        {
+          "id": "house_desk_1",
+          "zone": "HOUSE",
+          "tileX": 109, "tileY": 34,
+          "worldX": 3488, "worldY": 1088,
+          "type": "desk",
+          "facing": "down",
+          "animation": "sit_write",
+          "activity": ["gate"]
+        }
+      ]
+    }
+    ```
+
+    Key fields:
+    - **`facing`**: Which direction the sprite faces while interacting (determines which animation row to use)
+    - **`animation`**: The interaction animation to play (see Phase 16D)
+    - **`activity`**: Which backend activities map to this interaction point. When an agent is doing `tool_call` at the WORKSHOP, they walk to a `laptop` point. When doing `llm_generating`, also a laptop. When at the LIBRARY doing `tool_call` (web_search), they walk to a `bookshelf` point
+
+11. **Interaction point assignment**: When an agent arrives at a zone, instead of standing at the zone's center coordinate with horizontal spacing, assign them to the nearest available (unoccupied) interaction point in that zone:
+    ```typescript
+    assignInteractionPoint(agentName: string, zone: string, activity: string): InteractionPoint | null {
+      const points = this.interactionPoints
+        .filter(p => p.zone === zone && p.activity.includes(activity) && !p.occupiedBy);
+
+      if (points.length === 0) return null;  // fallback to zone center
+
+      // Pick nearest available point
+      const agent = this.agents.get(agentName);
+      points.sort((a, b) =>
+        distance(agent.sprite, a) - distance(agent.sprite, b)
+      );
+      points[0].occupiedBy = agentName;
+      return points[0];
+    }
+    ```
+
+12. **Occupancy tracking**: Each interaction point can only be used by one agent at a time. When an agent leaves a zone, release their interaction point. If all points in a zone are occupied, the extra agent stands nearby (current spacing behavior as fallback). This naturally limits how many agents can "work" at a building simultaneously — visually showing a capacity constraint.
+
+13. **Extract points from Tiled object layers**: The tilemap already has unused object layers (Object Interaction Blocks, etc.). Long-term, interaction points could be authored directly in Tiled as objects with custom properties and exported in the JSON — rather than maintaining a separate `interaction_points.json`. This is a nice-to-have that makes level design easier.
+
+#### Phase 16D — Interaction Animations
+
+Add new sprite animations for agents interacting with furniture.
+
+14. **Extended sprite sheets**: Expand each character's spritesheet from 12 frames to ~36 frames to accommodate interaction poses:
+    ```
+    Current (12 frames):
+      Row 0: walk-down  (0,1,2)
+      Row 1: walk-left  (3,4,5)
+      Row 2: walk-right (6,7,8)
+      Row 3: walk-up    (9,10,11)
+
+    Extended (36 frames):
+      Row 0-3: walk cycles (unchanged — 12 frames)
+      Row 4:   sit-idle     (12,13,14)  — seated, facing down, slight idle sway
+      Row 5:   sit-type     (15,16,17)  — seated, arms moving on keyboard
+      Row 6:   sit-write    (18,19,20)  — seated, pen-on-paper hand motion
+      Row 7:   sit-talk     (21,22,23)  — seated, head/hand gestures
+      Row 8:   stand-read   (24,25,26)  — standing, holding book, page-turn
+      Row 9:   stand-think  (27,28,29)  — standing, hand on chin, thought pose
+      Row 10:  stand-point  (30,31,32)  — standing, pointing at something (for presentations/debate)
+      Row 11:  celebrate    (33,34,35)  — arms up, task-complete celebration
+    ```
+    Each interaction animation is 3 frames at 4fps (slower than walking to feel deliberate).
+
+15. **Animation registration**: Extend `AgentRegistry.ensureAnims()` to register the new animations:
+    ```typescript
+    // Interaction animations (3 frames each, 4fps, looping)
+    const interactions = [
+      { key: "sit-idle",    start: 12 },
+      { key: "sit-type",    start: 15 },
+      { key: "sit-write",   start: 18 },
+      { key: "sit-talk",    start: 21 },
+      { key: "stand-read",  start: 24 },
+      { key: "stand-think", start: 27 },
+      { key: "stand-point", start: 30 },
+      { key: "celebrate",   start: 33 },
+    ];
+    for (const anim of interactions) {
+      scene.anims.create({
+        key: `${spriteKey}-${anim.key}`,
+        frames: scene.anims.generateFrameNumbers(spriteKey, {
+          start: anim.start, end: anim.start + 2
+        }),
+        frameRate: 4,
+        repeat: -1,
+      });
+    }
+    ```
+
+16. **Arrival → interaction transition**: When an agent reaches their assigned interaction point, transition from walk animation to the point's interaction animation:
+    ```typescript
+    onArriveAtInteractionPoint(agent: AgentEntry, point: InteractionPoint) {
+      const sprite = agent.sprite;
+
+      // Stop movement
+      sprite.setVelocity(0, 0);
+
+      // Snap to exact interaction position (pixel-perfect alignment with furniture)
+      sprite.setPosition(point.worldX, point.worldY);
+
+      // Play the interaction animation
+      sprite.play(`${agent.spriteKey}-${point.animation}`);
+
+      // Disable idle bob while interacting (character is "locked" to furniture)
+      agent.isInteracting = true;
+    }
+    ```
+
+17. **Activity-to-animation mapping**: When the backend sends an `AGENT_ACTIVITY` event, the frontend now has enough context to pick the right visual:
+    ```typescript
+    const ACTIVITY_ANIMATION_MAP: Record<string, string> = {
+      "tool_call":       "sit-type",      // using tools → typing at laptop
+      "llm_generating":  "stand-think",   // LLM thinking → thinking pose
+      "planning":        "sit-write",     // planning → writing notes
+      "idle":            "sit-idle",      // waiting → seated idle
+      "gate":            "stand-point",   // presenting to user → pointing/presenting
+    };
+    ```
+    But this is overridden by the interaction point's own `animation` field when the agent is at a specific point. E.g., a `web_search` tool call at a Library bookshelf plays `stand-read`, not `sit-type`.
+
+18. **Leaving interaction**: When an agent gets a new target (zone change), they:
+    1. Stop the interaction animation
+    2. Stand up — play 2 frames of a stand-up transition (or just snap to walk frame 1)
+    3. Release the interaction point (set `occupiedBy = null`)
+    4. Begin pathfinding to new destination
+
+#### Phase 16E — Advanced Path & Interaction Polish
+
+19. **Agent-agent collision avoidance**: Currently agents can overlap. With pathfinding in place, add lightweight steering to prevent agents from walking through each other:
+    - Mark tiles occupied by stationary agents as temporarily blocked
+    - Or use Phaser Arcade physics `collide()` between agent sprites (already have physics bodies) combined with a small repulsion force
+    - Keep it simple — full crowd simulation is overkill for 3-8 agents
+
+20. **Path preview on hover**: When the user hovers over an agent, show a faint dotted line of their planned path to their destination. Helps the user understand where agents are headed.
+
+21. **Speed variation by zone**: Agents walk faster on roads/paths and slower through grass or interiors. Read a "terrain cost" from tile properties and feed it into EasyStar's `setTileCost()`:
+    ```typescript
+    finder.setTileCost(TILE_ROAD, 0.5);    // roads are fast
+    finder.setTileCost(TILE_GRASS, 1.0);   // grass is normal
+    finder.setTileCost(TILE_INTERIOR, 0.8); // indoors is slightly fast
+    ```
+    This makes paths prefer roads when available, creating natural-looking foot traffic patterns.
+
+22. **Contextual idle behavior**: When agents have no active task and are at a zone, they don't just stand with an idle bob — they interact with nearby furniture:
+    - At DORM: sit on bed (sit-idle)
+    - At CAFE: sit at table (sit-talk, even without conversation — reading a menu)
+    - At PARK: stand-think (contemplating)
+    - This makes the village feel alive even between runs
+
+23. **Task-complete celebration**: When an agent finishes their task successfully (before moving to DORM), play the `celebrate` animation for 2 seconds. A small visual reward that makes task completion feel satisfying.
+
+### How Pathfinding Integrates with Other Features
+
+| Feature | Integration |
+|---------|-------------|
+| **9A (Tool-to-Zone Routing)** | Agent pathfinds to the correct building for each tool call, then sits at the appropriate interaction point (laptop at Workshop, bookshelf at Library, terminal at Forge) |
+| **15 (Conversational Collaboration)** | Agents pathfind to the Cafe to meet, sit at tables facing each other during roundtables, walk to each other's locations for consult-mode conversations |
+| **8C (Worn Paths)** | Pathfinding routes accumulate into the worn-path visualization — frequently-used routes become visible trails on the tilemap |
+| **4 (Zone Inspection)** | Clicking a building shows which interaction points exist and which are occupied |
+| **6 (Run Replay)** | Replayed paths use the same pathfinding for accurate movement reconstruction |
+
+### Value
+
+1. **Immersion**: Agents walk around buildings instead of through them. They sit at desks to type, stand at bookshelves to read. The village feels like a real place, not a decorated progress dashboard
+2. **Legibility**: You can tell what an agent is *doing* by watching their body, not just reading emoji. Typing at a laptop = coding. Standing at a bookshelf = researching. Sitting at a cafe table = discussing
+3. **Spatial storytelling**: The paths agents take through the village tell a story. Heavy traffic between Library and Workshop means research-driven work. Agents clustering at Cafe tables means collaborative planning. These patterns emerge naturally from pathfinding + interaction points
+4. **Capacity visualization**: Occupied interaction points show resource constraints at a glance. "All laptops at the Workshop are taken" means your team is at full coding capacity. Add more desks (Feature 8) to scale up
+5. **Foundation for evolution**: Pathfinding is a prerequisite for worn paths (8C), agent-agent meetings (15), building capacity limits (9C), and replay accuracy (6). It's infrastructure that makes many other features possible
+
+**Dependencies**: EasyStar.js (npm package, ~8KB), extended character spritesheets (pixel art work)
+**Files touched**: `movement.ts` (replace straight-line with path-following), `AgentRegistry.ts` (interaction point assignment, new animations, arrival behavior), `VillageScene.ts` (walkability grid extraction, pathfinder init, debug rendering)
+**New files**: `src/phaser/systems/Pathfinder.ts` (A* wrapper + path smoothing), `src/data/interaction_points.json` (furniture registry), extended character spritesheet PNGs (8 characters x 36 frames)
+
+---
+
+## 17. Confidence-Aware Gating & Agent Clarification Questions
+
+**Goal**: Agents self-assess the uncertainty in their outputs and can proactively ask the user clarifying questions mid-task — not just at gate checkpoints. The gating policy becomes *adaptive*: high-confidence outputs sail through automatically, uncertain outputs trigger deeper review, and genuinely confused agents can pause to ask "did you mean X or Y?" before producing something wrong. The result is fewer unnecessary gates (less user fatigue) and more gates exactly when they matter (less bad output).
+
+### The Problem with Current Gating
+
+The gate policy (`gate_policy.py`) is a static mode switch:
+- **STRICT**: gate after every task — user reviews everything, even trivially correct output
+- **BALANCED**: gate on final deliverable + leader requests — misses mid-task uncertainty
+- **AUTO**: gate on leader request only — agent might be deeply uncertain but never asks
+
+The decision factors are purely structural (`is_last_task`, `leader_recommended`). The policy has **zero awareness of output quality**:
+- An agent that's 99% sure its answer is correct still gets gated in STRICT mode
+- An agent that's 30% sure it understood the task correctly still runs to completion in AUTO mode
+- An agent that hits a genuine ambiguity ("do they want Python or JavaScript?") has no mechanism to ask — it guesses and hopes
+
+### Current State
+- `gate_policy.py` has two functions: `should_gate_task_complete()` (mode + is_last + leader_recommended) and `should_gate_tool_call()` (hardcoded for file_writer + terminal)
+- Gate interrupt payload in `graph.py:248-256` has a fixed `question` string ("Agent finished. Continue?" / "Final deliverable. Approve?") — no output-quality context
+- Agents have no self-assessment step — `create_react_agent` runs until it produces output, then the gate decision is made externally
+- No mechanism for agents to ask the user anything mid-task — `interrupt()` only fires after the full ReAct loop completes
+- The `GateModal` in the frontend shows the agent's output + a simple approve/reject interface with an optional note field
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                   Agent Output Pipeline                     │
+│                                                              │
+│  ReAct Loop ──► Self-Assessment ──► Gate Router              │
+│                                                              │
+│  Self-Assessment produces:                                   │
+│    confidence: 0.0–1.0                                       │
+│    uncertainty_reasons: ["ambiguous requirement", ...]       │
+│    clarification_questions: ["Did you mean X or Y?", ...]   │
+│                                                              │
+│  Gate Router decides:                                        │
+│    confidence > 0.85 → AUTO-APPROVE (skip gate)              │
+│    confidence 0.5–0.85 → STANDARD GATE (current behavior)  │
+│    confidence < 0.5 → MANDATORY GATE + flag uncertainty     │
+│    has clarification_questions → CLARIFICATION GATE          │
+│                        (ask user before producing output)    │
+└────────────────────────────────────────────────────────────┘
+```
+
+### Implementation Plan
+
+#### Phase 17A — Agent Self-Assessment
+
+Add a post-task confidence evaluation step inside the worker node.
+
+1. **Self-assessment prompt**: After `react_agent.ainvoke()` returns `final_output`, run a second LLM call (fast model — Haiku) that evaluates the output:
+   ```python
+   assessment_prompt = f"""Evaluate your output against the original task.
+
+   TASK: {task_description}
+   EXPECTED OUTPUT: {expected_output}
+   YOUR OUTPUT: {final_output[:2000]}
+
+   Respond with ONLY a JSON object:
+   {{
+     "confidence": <float 0.0-1.0>,
+     "reasoning": "<1-2 sentences explaining your confidence level>",
+     "uncertainty_reasons": ["<reason1>", ...],
+     "clarification_questions": ["<question for the user>", ...],
+     "risk_factors": ["<potential issue>", ...]
+   }}
+
+   Confidence guide:
+   - 0.9-1.0: Very confident — task is clear, output fully addresses it, facts are verified
+   - 0.7-0.9: Confident — output addresses the task but some details are inferred/assumed
+   - 0.5-0.7: Uncertain — task was ambiguous, output may miss the user's intent, or facts are unverified
+   - 0.0-0.5: Low confidence — significant ambiguity, missing context, or the output is likely incomplete/wrong
+   ```
+
+   Store the assessment result alongside the output:
+   ```python
+   class TaskOutput(TypedDict):
+       task_key: str
+       agent_name: str
+       output: str
+       confidence: float           # NEW
+       assessment: dict            # NEW — full assessment JSON
+   ```
+
+2. **Assessment model**: Use Haiku for the assessment call — it's fast and cheap, and self-assessment doesn't need deep reasoning. The assessment adds ~0.5s and ~$0.001 per task. Configurable: `ASSESSMENT_MODEL` in env or config.
+
+3. **Assessment caching for downstream agents**: When downstream agents receive upstream context via `context_parts`, include the confidence score so they can weight information accordingly:
+   ```
+   --- Output from Researcher (confidence: 0.72) ---
+   {output}
+   Note: The researcher flagged uncertainty about market size figures.
+   ```
+
+#### Phase 17B — Confidence-Aware Gate Policy
+
+Replace the static mode switch with an adaptive policy that factors in confidence.
+
+4. **Extended `should_gate_task_complete()`**: Add confidence as a gate input:
+   ```python
+   def should_gate_task_complete(
+       mode: GatingMode,
+       is_last_task: bool,
+       leader_recommended: bool = False,
+       confidence: float = 1.0,                   # NEW
+       has_clarification_questions: bool = False,  # NEW
+       risk_factors: list[str] | None = None,      # NEW
+   ) -> tuple[bool, str, str]:
+       """Returns: (should_gate, reason, gate_type)
+       gate_type: "standard" | "clarification" | "uncertainty_review"
+       """
+   ```
+
+5. **Adaptive thresholds per mode**: Each mode uses confidence differently:
+   ```python
+   # Confidence thresholds (configurable)
+   AUTO_APPROVE_THRESHOLD = 0.85
+   UNCERTAINTY_THRESHOLD = 0.50
+
+   if mode == "STRICT":
+       # Still gate everything, but annotate with confidence
+       return (True, f"Review required (confidence: {confidence:.0%})", "standard")
+
+   if mode == "BALANCED":
+       if has_clarification_questions:
+           return (True, "Agent needs clarification", "clarification")
+       if confidence < UNCERTAINTY_THRESHOLD:
+           return (True, f"Low confidence ({confidence:.0%}) — agent is uncertain", "uncertainty_review")
+       if confidence >= AUTO_APPROVE_THRESHOLD and not is_last_task:
+           return (False, "")  # AUTO-APPROVE — skip gate
+       return (True, f"Review required (confidence: {confidence:.0%})", "standard")
+
+   if mode == "AUTO":
+       if has_clarification_questions:
+           return (True, "Agent needs clarification before proceeding", "clarification")
+       if confidence < UNCERTAINTY_THRESHOLD:
+           return (True, f"Agent flagged uncertainty ({confidence:.0%})", "uncertainty_review")
+       return (False, "")  # auto-approve everything above threshold
+   ```
+
+   The key insight: in BALANCED mode, high-confidence outputs **skip the gate entirely**, reducing user fatigue by ~60-70% on typical runs. But low-confidence outputs get *more* scrutiny than before, with explicit uncertainty flags.
+
+6. **Gate payload includes assessment**: The `interrupt()` payload sent to the frontend now includes the full assessment:
+   ```python
+   decision = interrupt({
+       "gate_id": gate_id,
+       "run_id": run_id,
+       "agent_name": agent_name,
+       "question": question,
+       "context": final_output,
+       "reason": reason,
+       "gate_source": "task_complete",
+       "gate_type": gate_type,                    # NEW
+       "confidence": confidence,                  # NEW
+       "uncertainty_reasons": uncertainty_reasons, # NEW
+       "clarification_questions": clarification_questions,  # NEW
+       "risk_factors": risk_factors,               # NEW
+   })
+   ```
+
+#### Phase 17C — Mid-Task Clarification Questions
+
+Let agents ask the user questions *during* task execution, not just after.
+
+7. **`ask_user` tool**: Give agents a tool that triggers an interrupt mid-task to ask the user a clarifying question:
+   ```python
+   @tool
+   def ask_user(question: str, options: list[str] | None = None) -> str:
+       """Ask the user a clarifying question when you're unsure how to proceed.
+
+       Use this when:
+       - The task description is ambiguous
+       - You need to choose between approaches and the user's preference matters
+       - You need information that isn't available via other tools
+
+       Args:
+           question: The question to ask the user
+           options: Optional list of choices (if it's a multiple-choice question)
+
+       Returns:
+           The user's answer
+       """
+   ```
+
+   The tool implementation triggers a LangGraph `interrupt()` with a `"clarification"` gate type. The WebSocket handler sends a `GATE_REQUESTED` event with `gate_type: "clarification"`. The frontend shows a different modal (question-focused rather than approval-focused). When the user answers, the graph resumes and the tool returns the user's response as a string.
+
+8. **Ask-user budget**: To prevent agents from over-asking (which defeats the purpose of automation), limit clarification questions:
+   - Max 2 `ask_user` calls per agent per task
+   - After 2 questions, the tool returns "You've used your clarification budget. Make your best judgment and proceed."
+   - Budget is configurable per mode: STRICT allows 3, BALANCED allows 2, AUTO allows 1
+   - The agent's system prompt includes: "Use ask_user sparingly — only when the ambiguity would significantly change your output"
+
+9. **Smart question routing**: When an agent uses `ask_user`, the system checks if the answer might already exist:
+   - In agent memory (Feature 12): "The user prefers Python over JavaScript" → auto-answer from procedural memory
+   - In previous gate feedback (Feature 1, House memory): similar question was answered before → suggest the previous answer
+   - If a confident auto-answer exists, return it without interrupting the user, but log it: "Auto-answered from memory: Python"
+
+#### Phase 17D — Frontend: Confidence-Aware Gate UI
+
+Redesign the gate modal to surface uncertainty information.
+
+10. **Confidence indicator in GateModal**: Show a prominent confidence gauge at the top of the gate modal:
+    ```
+    ┌────────────────────────────────────────────┐
+    │  🟢 High Confidence (92%)                  │  ← green, minimal review needed
+    │  🟡 Moderate Confidence (68%)              │  ← yellow, review recommended
+    │  🔴 Low Confidence (35%)                   │  ← red, careful review needed
+    └────────────────────────────────────────────┘
+    ```
+    Color-coded: green (>85%), yellow (50-85%), red (<50%). The gauge gives the user an immediate sense of how much scrutiny the output needs.
+
+11. **Uncertainty callouts**: Below the confidence gauge, show the agent's `uncertainty_reasons` as highlighted callout boxes:
+    ```
+    ⚠️ Uncertainty Flags:
+    • Task description didn't specify target audience — assumed "technical developers"
+    • Market size data from 2023 — couldn't find 2024 figures
+    • Unsure whether to include competitor pricing (potentially sensitive)
+    ```
+    These help the user focus their review on the specific areas the agent is uncertain about, rather than reading the entire output.
+
+12. **Clarification gate variant**: When `gate_type === "clarification"`, the modal switches to a question-answer format instead of approve/reject:
+    ```
+    ┌────────────────────────────────────────────┐
+    │  ❓ Researcher has a question              │
+    │                                            │
+    │  "Should the competitive analysis focus on │
+    │   direct competitors only, or include      │
+    │   adjacent market players?"                │
+    │                                            │
+    │  Suggested options:                        │
+    │  ○ Direct competitors only                 │
+    │  ○ Include adjacent market                 │
+    │  ○ [Custom answer...]                      │
+    │                                            │
+    │  [Answer & Continue]                       │
+    └────────────────────────────────────────────┘
+    ```
+    The agent provides options when possible (from the `options` param in `ask_user`), but the user can always type a custom answer.
+
+13. **Quick-approve for high confidence**: When confidence > 85% and the mode is BALANCED, show a streamlined gate with a prominent "Auto-approved" badge and a small "Review anyway" link. The output is shown in a collapsed section. This acknowledges the gate without demanding attention:
+    ```
+    ┌────────────────────────────────────────────┐
+    │  ✅ Auto-approved (confidence: 93%)        │
+    │  Researcher completed market analysis       │
+    │  [▶ Show output]  [Review anyway]           │
+    └────────────────────────────────────────────┘
+    ```
+
+14. **Confidence trend in sidebar**: Show a per-agent confidence history in `AgentCard.tsx` or the sidebar — a sparkline or list of confidence scores across tasks. This helps the user spot agents that are consistently uncertain (maybe they need better prompting or different tools) vs. agents that are reliably confident.
+
+#### Phase 17E — Feedback Loop: Confidence Calibration
+
+Make confidence scores more accurate over time by learning from user decisions.
+
+15. **Calibration data**: Track the relationship between confidence scores and user gate decisions:
+    ```json
+    {
+      "agent": "Researcher",
+      "task": "market_analysis",
+      "confidence": 0.82,
+      "user_action": "approve",          // approve | reject | approve_with_note
+      "had_corrections": false,
+      "timestamp": "2024-12-15T10:30:00Z"
+    }
+    ```
+    Store in `backend/memory/house/{agent_id}_calibration.jsonl` (ties into Feature 1).
+
+16. **Threshold tuning**: After 10+ gate interactions, compute calibration stats:
+    - If an agent's outputs at confidence > 0.8 are rejected 30%+ of the time → the agent is overconfident → lower the auto-approve threshold for that agent
+    - If an agent's outputs at confidence < 0.5 are approved 80%+ of the time → the agent is underconfident → raise the threshold
+    - Adjust thresholds per agent, stored in agent memory (Feature 12)
+
+17. **Assessment prompt refinement**: Feed calibration data back into the assessment prompt:
+    ```
+    Calibration note: In your past assessments, you've been slightly overconfident.
+    Your outputs rated 0.8+ were rejected 25% of the time. Be more critical.
+    ```
+    This creates a self-improving loop: the agent learns to assess its own uncertainty more accurately.
+
+18. **Confidence in events**: Emit confidence scores in WebSocket events so the frontend can use them broadly:
+    ```json
+    {
+      "type": "TASK_SUMMARY",
+      "agentName": "Researcher",
+      "output": "...",
+      "confidence": 0.78,
+      "uncertaintyFlags": ["market size data may be outdated"]
+    }
+    ```
+    The EventFeed, AgentCard, and any future replay system (Feature 6) can display confidence alongside outputs.
+
+### How It Changes the Gate Flow
+
+```
+BEFORE (current):
+  Agent finishes task → static mode check → gate or no gate → done
+
+AFTER:
+  Agent finishes task
+    → Self-assessment (confidence + uncertainty + questions)
+    → Adaptive gate router:
+        ├─ confidence > 0.85 + BALANCED/AUTO → auto-approve (skip gate)
+        ├─ confidence 0.5-0.85 → standard gate (with uncertainty callouts)
+        ├─ confidence < 0.5 → mandatory gate + uncertainty review UI
+        └─ has clarification questions → clarification gate (question modal)
+    → User decision
+    → Calibration data logged → thresholds adjust over time
+
+  ALSO (mid-task):
+  Agent encounters ambiguity
+    → calls ask_user("Did you mean X or Y?")
+    → interrupt → clarification gate → user answers → agent continues with answer
+```
+
+### Value
+
+1. **Fewer unnecessary gates**: In BALANCED mode, high-confidence outputs auto-approve. Users stop clicking "Approve" on outputs they were going to approve anyway. Estimated 60-70% reduction in gate interactions for well-specified tasks
+2. **Better-targeted gates**: When gates *do* fire, they come with uncertainty context — the user knows exactly *where* to look and *what* the agent is unsure about. Review time per gate drops
+3. **Proactive clarification**: Agents ask before guessing. "Should I write this in Python or JavaScript?" takes 5 seconds to answer and saves a full task re-run. The user feels like they're collaborating with the agent, not just approving its work
+4. **Calibrated trust**: Over time, confidence thresholds adapt per agent. A consistently accurate researcher gets auto-approved more. A frequently wrong writer gets reviewed more. Trust is earned, not configured
+5. **Transparency**: Uncertainty flags make agent limitations visible. Users stop treating AI output as either "accept all" or "review everything" and develop nuanced, calibrated trust in each agent's capabilities
+
+**Files touched**: `gate_policy.py` (adaptive thresholds, confidence input), `graph.py` (self-assessment step, ask_user tool, assessment in TaskOutput), `main.py` (confidence in WS events, clarification gate handling), `events.py` (confidence fields on events), `tools.py` (ask_user tool), `GateModal.tsx` (confidence UI, clarification variant, uncertainty callouts), `AgentCard.tsx` (confidence trend), `Sidebar.tsx` (auto-approve notifications), `EventFeed.tsx` (confidence badges)
+**New files**: `backend/assessment.py` (self-assessment prompt + calibration logic)
+
+---
+
+## Updated Priority Order
+
+| # | Feature | Complexity | Dependencies |
+|---|---------|-----------|--------------|
+| 10 | Skip Interview — Auto-Generate Team | Low | None |
+| 1 | Zone-Based Memory System | Medium | None (new LIBRARY zone on tilemap) |
+| 7 | Dynamic LLM Model Assignment + Cost Tracking | Medium | None |
+| 9A | Tool-to-Zone Routing | Low | None (just routing existing tools to buildings) |
+| 17A-B | Confidence-Aware Gating | Medium | None (extends existing gate_policy.py) |
+| 16A-B | Pathfinding & Path Following | Medium | None (standalone Phaser-side improvement) |
+| 4 | Zone Inspection (Tooltips + Memory Viewer) | Medium | Feature 1 (reads memory stores) |
+| 2 | Saveable Teams | Medium | Feature 1 (memory travels with teams) |
+| 9B | Expanded Tool Registry | Medium | Feature 9A (zone routing in place) |
+| 17C | Mid-Task Clarification Questions | Medium | Feature 17A-B (assessment infrastructure) |
+| 16C-D | Interaction Points & Animations | Medium | Feature 16A-B (pathfinding to reach points) |
+| 12 | Robust Memory Persistence | Medium-High | Feature 1 (builds on zone memory infrastructure) |
+| 14 | Agent Skills Database | Medium | Feature 12 (skills reference agent memory) |
+| 13 | Context-Aware Reasoning Engine | High | Features 12, 14 (reasoning uses memory + skills) |
+| 15A | Conversational Collaboration — Conversation Bus | Medium | None (adds conversation state to graph) |
+| 15B | Conversational Collaboration — Modes | Medium-High | Feature 15A (bus infrastructure) |
+| 17D-E | Confidence UI & Calibration | Medium | Features 17A-C, 12 (UI + calibration needs memory) |
+| 3 | Mid-Run Interruption | Medium-High | None (but feedback goes to Feature 1's House memory) |
+| 6 | Run Replay / Timeline Scrubber | Medium-High | None (but benefits from Feature 1's zone logs) |
+| 11A-B | Framework-Agnostic (contract + adapter interface) | Medium-High | None (but best after core features stabilize) |
+| 9C | Building as Capability Gate | Medium | Features 8A, 9B (layout + expanded tools) |
+| 16E | Advanced Path & Interaction Polish | Low-Medium | Features 16C-D, 8C (interaction system + worn paths) |
+| 15C-D | Conversational Collaboration — Visualization & Polish | Medium | Features 15B, 16A-B (modes + pathfinding for meetings) |
+| 8 | Customizable & Evolving Village | High | Features 1, 2, 4, 9A |
+| 11C-E | Framework-Agnostic (CrewAI/AutoGen/UI) | High | Feature 11A-B |
+| 5 | Multi-Village & Marketplace | High | Features 1, 2, 8 |
+
+Recommended order: **10 → 1 → 7 → 9A → 17A-B → 16A-B → 4 → 2 → 9B → 17C → 16C-D → 12 → 14 → 15A → 15B → 17D-E → 13 → 3 → 6 → 11A-B → 8 → 9C → 16E → 15C-D → 11C-E → 5**
+
+Feature 8 is phased internally: **8A (presets)** can ship early alongside Feature 2. **8B (drag-to-customize)** and **8C (evolution)** are the longer tail. **8D (deep behavior integration)** is the final payoff that ties everything together.
+
+Feature 9 is also phased: **9A (routing)** is a quick win that can ship very early. **9B (new tools)** is ongoing. **9C (capability gating)** requires Feature 8.
+
+Feature 11 is phased: **11A-B (contract + adapter refactor)** is the important architectural work. **11C-E (additional adapters + UI)** are incremental after that.
+
+Features 12, 13, 14 form a **cognitive stack**: **12 (memory)** gives agents persistence, **14 (skills)** gives them reusable capabilities, and **13 (reasoning)** gives them the intelligence to use both effectively. Best implemented in that order.
+
+Feature 15 is phased: **15A (conversation bus)** adds the shared message-passing infrastructure. **15B (modes)** adds CONSULT/ROUNDTABLE/DEBATE patterns on top. **15C-D (visualization + polish)** brings conversations to life in the village with speech bubbles, Cafe gatherings, and quality controls. Best placed after the skills database (14) so agents have rich context to discuss, and before the reasoning engine (13) which can leverage collaborative insights.
+
+Feature 16 is phased: **16A-B (pathfinding + path following)** is the foundation — agents navigate around obstacles instead of through them. Ship early because it's purely frontend and immediately makes the village more believable. **16C-D (interaction points + animations)** adds the "sit at laptop, read bookshelf" behavior that makes zones feel functional. **16E (polish)** adds collision avoidance, speed variation, and contextual idle — the details that make it feel alive. 16A-B is a prerequisite for 15C-D (agents need pathfinding to walk to Cafe meetings) and enhances 9A (tool-zone routing looks better when agents walk realistic paths).
+
+Feature 17 is phased: **17A-B (self-assessment + adaptive gate policy)** is high-value and low-risk — it immediately reduces gate fatigue in BALANCED mode while catching uncertain outputs better. Ship early, right after tool-zone routing. **17C (mid-task clarification)** adds the `ask_user` tool so agents can ask questions during work, not just at the end. **17D-E (confidence UI + calibration)** is the long-term payoff — per-agent threshold tuning and rich uncertainty visualization. 17D-E benefits from Feature 12 (agent memory stores calibration data) so it's placed later in the order.
