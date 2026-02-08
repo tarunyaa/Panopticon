@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import os
 import re
-import concurrent.futures
 import yaml
 from dotenv import load_dotenv
 from crewai import Agent, Crew, Process, Task, LLM
 
-# Load .env from panopticon dir (has ANTHROPIC_API_KEY)
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "panopticon", ".env"))
+# Load .env from project root
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 try:
     from .events import (
@@ -48,48 +47,6 @@ except ImportError:
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 
-
-def _clean_crewai_output(raw: str) -> str:
-    """Strip CrewAI internal ReAct markers and verbose logging headers.
-
-    CrewAI injects markers like ``Thought:``, ``Action:``,
-    ``## Agent:``, ``AgentFinishThought``, etc. into its raw output.
-    We extract only the meaningful final answer.
-    """
-    text = raw.strip()
-
-    # If there's a "Final Answer:" marker, take everything after the last one
-    fa_pattern = re.compile(r"Final Answer:\s*", re.IGNORECASE)
-    matches = list(fa_pattern.finditer(text))
-    if matches:
-        text = text[matches[-1].end():]
-
-    # Strip verbose logging headers (# Agent:, ## Task:, ## Thought:, etc.)
-    text = re.sub(
-        r"^#{1,3}\s*(Agent|Task|Thought|Using tool|Tool Input|Tool Output|Final Answer)[:\s].*$",
-        "",
-        text,
-        flags=re.MULTILINE,
-    )
-
-    # Strip ReAct pattern lines (Thought:, Action:, Action Input:, Observation:)
-    text = re.sub(
-        r"^(Thought|Action|Action Input|Observation)\s*\d*\s*:.*$",
-        "",
-        text,
-        flags=re.MULTILINE,
-    )
-
-    # Strip internal tokens (AgentFinishThought, AgentFinish, etc.)
-    text = re.sub(r"AgentFinish(Thought)?", "", text)
-
-    # Strip stray trailing triple-backticks
-    text = re.sub(r"```\s*$", "", text)
-
-    # Collapse excessive blank lines
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-
-    return text
 
 
 def _first_sentence_end(text: str, limit: int = 140) -> int:
@@ -156,7 +113,7 @@ def _make_combined_task_callback(
             )
 
         # Handle task completion
-        cleaned = _clean_crewai_output(str(task_output))
+        cleaned = str(task_output).strip()
         summary = _summarize_task_output(cleaned)
         event_bus.emit(
             run_id,

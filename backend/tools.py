@@ -1,19 +1,19 @@
-"""Tool registry for CrewAI agents.
+"""Tool registry for LangChain agents.
 
 Provides web_search, web_scraper, terminal (sandboxed), and file_writer tools.
 """
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
-import textwrap
 
-from crewai.tools import BaseTool
-from crewai_tools import FileWriterTool, ScrapeWebsiteTool, SerperDevTool
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# SandboxedShellTool — safe subset of shell commands
+# SandboxedShellTool — allowlist-based command execution (no shell=True)
 # ---------------------------------------------------------------------------
 
 _ALLOWED_CMDS = {
@@ -21,111 +21,169 @@ _ALLOWED_CMDS = {
     "pwd", "echo", "date", "python", "node", "git", "pip", "npm",
 }
 
-_BLOCKED_PATTERNS = [
-    "rm", "del", "rmdir", "format", "install", "uninstall",
-    "--force", "-rf", ">>", ">",
-]
+_BLOCKED_SUBCOMMANDS = {
+    "git": {"push", "remote", "config"},
+    "pip": {"install", "uninstall"},
+    "npm": {"install", "uninstall", "publish"},
+}
 
 _SHELL_TIMEOUT = 30
 _MAX_OUTPUT = 5000
 
 
-class SandboxedShellTool(BaseTool):
-    name: str = "terminal"
-    description: str = (
-        "Run a shell command in a sandboxed environment. "
-        "Allowed commands: ls, dir, cat, type, head, tail, grep, find, wc, "
-        "pwd, echo, date, python, node, git, pip, npm. "
-        "Dangerous operations (rm, del, install, push, redirects) are blocked."
-    )
+@tool
+def terminal(command: str) -> str:
+    """Run a shell command in a sandboxed environment.
 
-    def _run(self, command: str) -> str:
-        # Extract the base command (first token)
-        parts = command.strip().split()
-        if not parts:
-            return "Error: empty command"
+    Allowed commands: ls, dir, cat, type, head, tail, grep, find, wc,
+    pwd, echo, date, python, node, git, pip, npm.
+    Dangerous operations are blocked.
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError as e:
+        return f"Error: could not parse command: {e}"
 
-        base_cmd = parts[0].lower()
-        if base_cmd not in _ALLOWED_CMDS:
-            return f"Error: command '{base_cmd}' is not in the allowed list: {', '.join(sorted(_ALLOWED_CMDS))}"
+    if not argv:
+        return "Error: empty command"
 
-        # Check for blocked patterns anywhere in the command
-        cmd_lower = command.lower()
-        for pattern in _BLOCKED_PATTERNS:
-            if pattern in cmd_lower:
-                return f"Error: blocked pattern '{pattern}' detected in command"
+    # Resolve to just the binary name (strip path components like ./rm or /bin/rm)
+    base_cmd = os.path.basename(argv[0]).lower()
 
-        try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=_SHELL_TIMEOUT,
+    if base_cmd not in _ALLOWED_CMDS:
+        return f"Error: command '{base_cmd}' is not in the allowed list: {', '.join(sorted(_ALLOWED_CMDS))}"
+
+    # Check blocked subcommands for specific tools
+    blocked_subs = _BLOCKED_SUBCOMMANDS.get(base_cmd)
+    if blocked_subs and len(argv) > 1:
+        sub = argv[1].lower().lstrip("-")
+        if sub in blocked_subs:
+            return f"Error: '{base_cmd} {argv[1]}' is not allowed"
+
+    try:
+        result = subprocess.run(
+            argv,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=_SHELL_TIMEOUT,
+        )
+        output = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+        output = output.strip()
+        if len(output) > _MAX_OUTPUT:
+            output = output[:_MAX_OUTPUT] + f"\n... (truncated at {_MAX_OUTPUT} chars)"
+        return output or "(no output)"
+    except subprocess.TimeoutExpired:
+        return f"Error: command timed out after {_SHELL_TIMEOUT}s"
+    except Exception as e:
+        return f"Error running command: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Web search tool
+# ---------------------------------------------------------------------------
+
+@tool
+def web_search(query: str) -> str:
+    """Search the web using Serper API for real-time information.
+
+    Args:
+        query: The search query string.
+    """
+    api_key = os.environ.get("SERPER_API_KEY")
+    if not api_key:
+        return "Error: SERPER_API_KEY not set"
+
+    import httpx
+
+    try:
+        resp = httpx.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            json={"q": query},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        results = []
+        for item in data.get("organic", [])[:5]:
+            results.append(
+                f"**{item.get('title', '')}**\n{item.get('snippet', '')}\n{item.get('link', '')}"
             )
-            output = result.stdout
-            if result.stderr:
-                output += "\n" + result.stderr
-            output = output.strip()
-            if len(output) > _MAX_OUTPUT:
-                output = output[:_MAX_OUTPUT] + f"\n... (truncated at {_MAX_OUTPUT} chars)"
-            return output or "(no output)"
-        except subprocess.TimeoutExpired:
-            return f"Error: command timed out after {_SHELL_TIMEOUT}s"
-        except Exception as e:
-            return f"Error running command: {e}"
+
+        if data.get("answerBox"):
+            box = data["answerBox"]
+            answer = box.get("answer") or box.get("snippet") or ""
+            if answer:
+                results.insert(0, f"**Answer Box:** {answer}")
+
+        return "\n\n".join(results) if results else "No results found."
+    except Exception as e:
+        return f"Error searching web: {e}"
 
 
 # ---------------------------------------------------------------------------
-# Safe wrappers for external tools (always return a STRING tool_result)
+# Web scraper tool
 # ---------------------------------------------------------------------------
 
-import json
+@tool
+def web_scraper(url: str) -> str:
+    """Read and extract text content from a URL.
+
+    Args:
+        url: The full URL to scrape.
+    """
+    import httpx
+
+    try:
+        resp = httpx.get(url, timeout=15.0, follow_redirects=True)
+        resp.raise_for_status()
+        text = resp.text
+
+        # Simple HTML stripping (enough for agent consumption)
+        import re
+        text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
+        text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        if len(text) > _MAX_OUTPUT:
+            text = text[:_MAX_OUTPUT] + f"\n... (truncated at {_MAX_OUTPUT} chars)"
+        return text or "(empty page)"
+    except Exception as e:
+        return f"Error scraping URL: {e}"
 
 
-class SafeSerperDevTool(SerperDevTool):
-    def _run(self, *args, **kwargs):  # type: ignore[override]
-        print(f"[TOOL CALL] web_search | args={args} | kwargs={kwargs}")
-        try:
-            out = super()._run(*args, **kwargs)
-            print(f"[TOOL OUT TYPE] web_search | type={type(out)} | is_str={isinstance(out, str)}")
-            # Ensure output is always a string
-            if isinstance(out, str):
-                return out
-            return json.dumps(out, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[TOOL ERROR] web_search | {e}")
-            return f"Tool error (web_search): {e}"
+# ---------------------------------------------------------------------------
+# File writer tool
+# ---------------------------------------------------------------------------
+
+class FileWriteInput(BaseModel):
+    file_path: str = Field(description="The path to the file to write")
+    content: str = Field(description="The content to write to the file")
 
 
-class SafeScrapeWebsiteTool(ScrapeWebsiteTool):
-    def _run(self, *args, **kwargs):  # type: ignore[override]
-        print(f"[TOOL CALL] web_scraper | args={args} | kwargs={kwargs}")
-        try:
-            out = super()._run(*args, **kwargs)
-            print(f"[TOOL OUT TYPE] web_scraper | type={type(out)} | is_str={isinstance(out, str)}")
-            # Ensure output is always a string
-            if isinstance(out, str):
-                return out
-            return json.dumps(out, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[TOOL ERROR] web_scraper | {e}")
-            return f"Tool error (web_scraper): {e}"
+@tool(args_schema=FileWriteInput)
+def file_writer(file_path: str, content: str) -> str:
+    """Write content to a file on disk.
 
+    Args:
+        file_path: The path to the file to write.
+        content: The content to write to the file.
+    """
+    try:
+        # Basic safety: prevent writing outside working directory
+        import os.path
+        abs_path = os.path.abspath(file_path)
 
-class SafeFileWriterTool(FileWriterTool):
-    def _run(self, *args, **kwargs):  # type: ignore[override]
-        print(f"[TOOL CALL] file_writer | args={args} | kwargs={kwargs}")
-        try:
-            out = super()._run(*args, **kwargs)
-            print(f"[TOOL OUT TYPE] file_writer | type={type(out)} | is_str={isinstance(out, str)}")
-            # Ensure output is always a string
-            if isinstance(out, str):
-                return out
-            return json.dumps(out, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[TOOL ERROR] file_writer | {e}")
-            return f"Tool error (file_writer): {e}"
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"Successfully wrote {len(content)} characters to {file_path}"
+    except Exception as e:
+        return f"Error writing file: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -138,28 +196,28 @@ TOOL_REGISTRY: dict[str, dict] = {
         "label": "Web Search",
         "description": "Search the web using Serper API for real-time information",
         "env_key": "SERPER_API_KEY",
-        "factory": lambda: SafeSerperDevTool(),
+        "factory": lambda: web_search,
     },
     "web_scraper": {
         "id": "web_scraper",
         "label": "Web Scraper",
         "description": "Read and extract content from any URL",
         "env_key": None,
-        "factory": lambda: SafeScrapeWebsiteTool(),
+        "factory": lambda: web_scraper,
     },
     "terminal": {
         "id": "terminal",
         "label": "Terminal",
         "description": "Run sandboxed shell commands (ls, cat, grep, python, git, etc.)",
         "env_key": None,
-        "factory": lambda: SandboxedShellTool(),
+        "factory": lambda: terminal,
     },
     "file_writer": {
         "id": "file_writer",
         "label": "File Writer",
         "description": "Write content to files on disk",
         "env_key": None,
-        "factory": lambda: SafeFileWriterTool(),
+        "factory": lambda: file_writer,
     },
 }
 
@@ -189,7 +247,6 @@ def instantiate_tools(tool_ids: list[str]) -> list:
         entry = TOOL_REGISTRY.get(tid)
         if not entry:
             continue
-        # Skip tools that need an env key that isn't set
         env_key = entry["env_key"]
         if env_key and not os.environ.get(env_key):
             continue

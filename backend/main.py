@@ -10,9 +10,9 @@ from contextlib import asynccontextmanager
 from typing import List
 from dotenv import load_dotenv
 
-# Load env BEFORE any CrewAI imports (they probe for API keys at import time)
+# Load env BEFORE any LangChain imports
 _dir = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(_dir, "..", "panopticon", ".env"))
+load_dotenv(os.path.join(_dir, "..", ".env"))
 
 import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .events import event_bus, gate_store, GateResponse, GatingMode
-from .crew import run_crew
+from .graph import run_graph
 from .tools import get_available_tools, TOOL_REGISTRY
 from .planner import plan_team
 
@@ -103,9 +103,6 @@ class GateResponseRequest(BaseModel):
 def plan_team_endpoint(req: PlanTeamRequest):
     """Let the leader LLM interview the user and generate a team based on team description.
 
-    The team_description should describe the TYPE of team needed (e.g., "software development team",
-    "content creation team") rather than a specific task. The team will be reusable for multiple tasks.
-
     Synchronous def (not async) so FastAPI runs it in a thread pool,
     avoiding blocking the event loop during the Anthropic API call.
     """
@@ -123,7 +120,7 @@ async def start_run(req: RunRequest):
     event_bus.create_run(run_id)
 
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(executor, run_crew, run_id, req.prompt, req.mode)
+    loop.run_in_executor(executor, run_graph, run_id, req.prompt, req.mode)
 
     return RunResponse(runId=run_id)
 

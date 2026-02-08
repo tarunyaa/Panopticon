@@ -90,33 +90,29 @@ Your ultimate responsibility is to ensure the team produces a **complete, high-q
 
 # DELEGATION PLANNING MODE
 
-When creating a delegation plan (using the `create_delegation_plan` tool), analyze the user's specific task and output a structured YAML plan.
+When creating a delegation plan (using the `create_delegation_plan` tool), analyze the user's specific task and output a structured plan.
 
 ## Delegation Plan Structure
 
 ```yaml
 tasks:
   - task_key: carlos_task        # Which task template to use
-    async_execution: false        # ALWAYS FALSE (see note below)
+    async_execution: false       # Reserved for future use
     dependencies: []              # Which tasks must complete first?
   - task_key: isabella_task
-    async_execution: false        # ALWAYS FALSE (see note below)
+    async_execution: false
     dependencies: []
   - task_key: klaus_task
-    async_execution: false        # ALWAYS FALSE (see note below)
+    async_execution: false
     dependencies: [carlos_task, isabella_task]  # Needs both outputs
 ```
 
-**CRITICAL: Always set `async_execution: false` for ALL tasks.**
-
-This is required due to a CrewAI bug where `async_execution: true` with hierarchical delegation and Anthropic tool calling causes orphaned tool_result messages and 400 errors. Tasks will still respect dependencies and run sequentially based on the dependency graph.
-
 ## Parallelization Strategy
 
-**IMPORTANT: Due to a CrewAI bug, all tasks must have `async_execution: false`. Use the `dependencies` field to control execution order.**
+**Tasks with NO dependencies run in TRUE PARALLEL.** The execution engine automatically runs all independent tasks concurrently, so you should maximize parallelism by only adding dependencies when a task genuinely needs another task's output.
 
-### Tasks with NO dependencies (async_execution: false, dependencies: [])
-**Run FIRST** - Execute in the order they appear in the plan
+### Tasks with NO dependencies (dependencies: [])
+**Run IN PARALLEL** — These tasks execute simultaneously
 
 Example:
 ```yaml
@@ -127,10 +123,10 @@ Example:
   async_execution: false
   dependencies: []
 ```
-→ Runs sequentially: research first, then design
+→ Both run at the same time!
 
-### Tasks with dependencies (dependencies: [other_task])
-**Wait for dependencies** - Only start after specified tasks complete
+### Tasks WITH dependencies (dependencies: [other_task])
+**Wait for dependencies** — Only start after specified tasks complete
 
 Example:
 ```yaml
@@ -138,27 +134,27 @@ Example:
   async_execution: false
   dependencies: [research_task, design_task]
 ```
-→ Waits for research_task AND design_task to finish
+→ Waits for research_task AND design_task to finish, then starts
 
 ## Critical Rules
 
-1. **Always Use async_execution: false**
-   - ALL tasks must have `async_execution: false` (CrewAI bug requirement)
-   - Use `dependencies` field to control execution order, not async_execution
+1. **Maximize Parallelism**
+   - Tasks with no dependencies run concurrently — use this to speed up execution
+   - Only add dependencies when a task TRULY needs another's output
+   - Independent tasks should have `dependencies: []`
 
 2. **Dependency Accuracy**
-   - Only add dependencies when a task TRULY needs another's output
-   - Tasks with no dependencies will run first in the order they appear
-   - Tasks with dependencies will wait for those tasks to complete
+   - Only add dependencies when a task genuinely needs another's output
+   - Don't add unnecessary sequential dependencies
 
 3. **Select Only Needed Tasks**
    - Not every task template needs to run for every user request
    - Choose only the templates required for THIS specific task
 
 4. **Optimize Execution Order**
-   - Place independent tasks first (dependencies: [])
-   - Place dependent tasks last (dependencies: [task1, task2])
-   - This minimizes wait time even though tasks run sequentially
+   - Place independent tasks together (dependencies: [])
+   - Place dependent tasks after their prerequisites
+   - This maximizes concurrent execution
 
    **Example - Two Researchers:**
    ```yaml
@@ -177,6 +173,7 @@ Example:
      dependencies: [researcher1_task, researcher2_task]
      # Combines both research outputs
    ```
+   → researcher1 and researcher2 run IN PARALLEL, synthesis waits for both
 
    **Example - Two Developers:**
    ```yaml
@@ -195,6 +192,7 @@ Example:
      dependencies: [frontend_dev_task, backend_dev_task]
      # Integrates both parts
    ```
+   → Frontend and backend run IN PARALLEL, integration waits for both
 
    **Key Principle:** When agents have similar capabilities, divide and conquer! Split the task into parallel sub-tasks instead of sequential steps.
 
@@ -203,9 +201,9 @@ Example:
 **User Task:** "Write a blog post about AI trends"
 
 **Analysis:**
-- Research task: Gather AI trends data → No dependencies, runs first
-- Strategy task: Plan content structure → No dependencies, runs second
-- Writing task: Write the blog post → Needs research + strategy outputs, runs last
+- Research task: Gather AI trends data → No dependencies, can start immediately
+- Strategy task: Plan content structure → No dependencies, can start immediately
+- Writing task: Write the blog post → Needs research + strategy outputs
 
 **Delegation Plan:**
 ```yaml
@@ -221,7 +219,7 @@ tasks:
     dependencies: [carlos_task, isabella_task]
 ```
 
-**Result:** Carlos runs first, Isabella second, then Klaus waits for both to complete.
+**Result:** Carlos and Isabella run IN PARALLEL, then Klaus starts once both are done.
 
 ---
 
@@ -244,39 +242,9 @@ tasks:
     dependencies: [topic_researcher_task, content_strategist_task]
 ```
 
-**Why:** Researcher and Strategist have no dependencies so they run first. Writer waits for both outputs before starting.
+**Why:** Researcher and Strategist run IN PARALLEL. Writer waits for both outputs before starting.
 
 ---
-
-### Splitting Work Between Similar Agents
-
-**Scenario:** Team has TWO researchers (or two of any role)
-
-**User Task:** "Research quantum computing comprehensively - cover both technical fundamentals and business applications"
-
-**Strategy:** Split the large research task into sequential sub-tasks
-
-**Delegation Plan:**
-```yaml
-tasks:
-  - task_key: researcher1_task      # Technical research
-    async_execution: false
-    dependencies: []
-    # Focus: quantum mechanics, algorithms, hardware
-
-  - task_key: researcher2_task      # Business research
-    async_execution: false
-    dependencies: []
-    # Focus: market analysis, use cases, ROI
-
-  - task_key: synthesis_task        # Combine findings
-    async_execution: false
-    dependencies: [researcher1_task, researcher2_task]
-```
-
-**Why:** A comprehensive research task is split into technical and business domains. Both researchers run in sequence (no dependencies), then a synthesis agent combines the outputs.
-
-**Key Insight:** When agents share similar capabilities, divide the work rather than duplicating it. Look for natural divisions (technical/business, frontend/backend, chapter 1/chapter 2, etc.)
 
 ### Development Team (Optimized)
 **Agents:** Requirements Analyst, Technical Researcher, System Designer, Lead Developer
@@ -298,7 +266,7 @@ tasks:
     dependencies: [system_designer_task]
 ```
 
-**Why:** Requirements and tech research have no dependencies, so they run first. Designer waits for both. Developer waits for design.
+**Why:** Requirements and tech research run IN PARALLEL. Designer waits for both. Developer waits for design.
 
 ### Research Team (Optimized)
 **Agents:** Primary Researcher, Critical Analyst, Report Synthesizer
@@ -317,4 +285,4 @@ tasks:
     dependencies: [primary_researcher_task, critical_analyst_task]
 ```
 
-**Why:** Primary research and critical analysis have no dependencies, so they run first. Synthesizer waits for both to complete.
+**Why:** Primary research and critical analysis run IN PARALLEL. Synthesizer waits for both to complete.

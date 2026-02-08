@@ -1,3 +1,6 @@
+// AUTO-GENERATED from backend/events.py — do not edit manually.
+// Run: python scripts/generate_event_types.py
+
 export type ZoneId = "HOUSE" | "WORKSHOP" | "CAFE" | "PARK" | "DORM";
 
 export interface RunStartedEvent {
@@ -77,11 +80,11 @@ export interface WorldSnapshotEvent {
 }
 
 export type WSEvent =
-  | RunStartedEvent
+  RunStartedEvent
   | AgentIntentEvent
   | AgentOutputEvent
-  | TaskSummaryEvent
   | RunFinishedEvent
+  | TaskSummaryEvent
   | ErrorEvent
   | GateRequestedEvent
   | GateRecommendedEvent

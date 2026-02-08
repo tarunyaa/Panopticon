@@ -1,209 +1,209 @@
-"""CrewAI-powered Leader agent that plans teams based on leader_rules.md."""
+"""LangChain-powered Leader agent that plans teams and task delegation.
 
+Replaces CrewAI-based planner with direct ChatAnthropic + tool calling.
+"""
 from __future__ import annotations
 
 import os
 import yaml
 from pathlib import Path
 from typing import Any
+
 from dotenv import load_dotenv
-
-from crewai import Agent, Crew, Process, Task, LLM
-from crewai.tools import BaseTool
-from pydantic import Field
-
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 
 _dir = Path(__file__).parent
 
-# Load .env file from panopticon directory (has ANTHROPIC_API_KEY)
-_env_path = _dir.parent / "panopticon" / ".env"
+# Load .env from project root
+_env_path = _dir.parent / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
 
+_MODEL = "claude-sonnet-4-5-20250929"
+
 
 # ============================================================================
-# Custom Tools for Leader Agent
+# Tool schemas for structured output
 # ============================================================================
 
 
-class AskQuestionTool(BaseTool):
-    """Tool for the Leader to ask the user a clarifying question."""
-
-    name: str = "ask_question"
-    description: str = (
-        "Ask the user ONE short, focused question (single sentence, under 20 words). "
-        "Keep it concise and specific. No compound questions or follow-ups. "
-        "Use this to gather information before creating the team. "
-        "Maximum 8 questions total - stop early if you have enough context. "
-        "ONLY use this tool if you need more information. "
-        "Once you use this tool, your turn ends and you must wait for the user's answer."
-    )
-
-    def _run(self, question: str) -> str:
-        """Write question to marker file and return completion signal.
-
-        The planner flow will detect this file and return the question
-        to the frontend instead of continuing execution.
-        """
-        # Write marker file
-        marker_path = _dir / ".question_asked"
-        with open(marker_path, "w") as f:
-            f.write(question)
-
-        # Return a definitive completion message (no special markers that confuse CrewAI)
-        return (
-            f"SUCCESS: Question has been sent to the user and I am now waiting for their response. "
-            f"The question was: '{question}'. "
-            f"I will receive their answer in the next turn and can continue the planning process."
-        )
+class AskQuestionInput(BaseModel):
+    question: str = Field(description="A short, focused question (under 20 words) to ask the user")
 
 
-class CreateDelegationPlanTool(BaseTool):
-    """Tool for the Leader to output a task delegation plan for execution."""
-
-    name: str = "create_delegation_plan"
-    description: str = (
-        "Generate a delegation plan that specifies which tasks to run, their execution order, "
-        "and parallelization strategy. Output valid YAML with the delegation plan structure. "
-        "Use 2-space indentation, NO tabs."
-    )
-
-    plan_path: str = Field(default=str(_dir / "delegation_plan.yaml"))
-
-    def _run(self, yaml_content: str) -> str:
-        """Parse and write the delegation plan to disk.
-
-        Args:
-            yaml_content: YAML string with delegation plan structure
-
-        Returns:
-            Success message or error details
-        """
-        try:
-            plan = yaml.safe_load(yaml_content)
-
-            if not isinstance(plan, dict):
-                return f"Error: delegation plan must be a dictionary, got {type(plan)}"
-
-            # Validate structure
-            if "tasks" not in plan:
-                return "Error: delegation plan must have 'tasks' key"
-
-            tasks = plan["tasks"]
-            if not isinstance(tasks, list):
-                return "Error: 'tasks' must be a list"
-
-            # Validate each task entry
-            for i, task in enumerate(tasks):
-                if not isinstance(task, dict):
-                    return f"Error: task[{i}] must be a dictionary"
-
-                if "task_key" not in task:
-                    return f"Error: task[{i}] missing 'task_key'"
-
-                if "async_execution" not in task:
-                    return f"Error: task[{i}] missing 'async_execution'"
-
-                if "dependencies" not in task:
-                    return f"Error: task[{i}] missing 'dependencies'"
-
-                if not isinstance(task["dependencies"], list):
-                    return f"Error: task[{i}] 'dependencies' must be a list"
-
-            # Write plan to file
-            with open(self.plan_path, "w") as f:
-                yaml.dump(plan, f, sort_keys=False, default_flow_style=False)
-
-            return (
-                f"SUCCESS: Delegation plan created with {len(tasks)} tasks. "
-                f"Plan saved and ready for execution."
-            )
-
-        except yaml.YAMLError as e:
-            return f"Error parsing YAML: {e}"
-        except Exception as e:
-            return f"Error creating delegation plan: {e}"
+class AgentSpec(BaseModel):
+    key: str = Field(description="Lowercase agent key (e.g., 'carlos', 'abigail')")
+    role: str = Field(description="Agent's role title")
+    goal: str = Field(description="One-sentence goal")
+    backstory: str = Field(description="2-5 sentence backstory with relevant expertise")
+    tools: list[str] = Field(default_factory=list, description="Tool IDs: web_search, web_scraper, terminal, file_writer")
+    task_description: str = Field(description="Generic task description with {prompt} placeholder")
+    expected_output: str = Field(description="Explicit, checkable expected output format")
 
 
-class CreateTeamFilesTool(BaseTool):
-    """Tool for the Leader to output the final agents.yaml and tasks.yaml files."""
+class CreateTeamInput(BaseModel):
+    agents: list[AgentSpec] = Field(description="List of 3-4 agents including the Leader")
 
-    name: str = "create_team_files"
-    description: str = (
-        "Generate the final team configuration by outputting valid YAML content. "
-        "CRITICAL: Output must be TWO YAML documents separated by '---'. "
-        "First document: agents.yaml, Second document: tasks.yaml. "
-        "Use 2-space indentation, quote strings with special characters, NO tabs. "
-        "Follow the exact format shown in your instructions."
-    )
 
-    agents_path: str = Field(default=str(_dir / "agents.yaml"))
-    tasks_path: str = Field(default=str(_dir / "tasks.yaml"))
+class DelegationTaskEntry(BaseModel):
+    task_key: str = Field(description="Task key from tasks.yaml (e.g., 'abigail_task')")
+    async_execution: bool = Field(default=False, description="Whether this task runs async (used by executor)")
+    dependencies: list[str] = Field(default_factory=list, description="Task keys that must complete before this one")
 
-    def _run(self, yaml_content: str) -> str:
-        """Parse and write the YAML files to disk.
 
-        Args:
-            yaml_content: A multi-document YAML string with agents.yaml and tasks.yaml
+class CreateDelegationPlanInput(BaseModel):
+    tasks: list[DelegationTaskEntry] = Field(description="Ordered list of tasks to execute")
 
-        Returns:
-            Success message or error details
-        """
-        try:
-            # Split into two documents
-            docs = list(yaml.safe_load_all(yaml_content))
 
-            if len(docs) != 2:
-                return f"Error: Expected 2 YAML documents (agents.yaml, tasks.yaml), got {len(docs)}"
+# ============================================================================
+# Tool implementations
+# ============================================================================
 
-            agents_config = docs[0]
-            tasks_config = docs[1]
 
-            if not isinstance(agents_config, dict):
-                return f"Error: agents.yaml must be a dictionary, got {type(agents_config)}"
-            if not isinstance(tasks_config, dict):
-                return f"Error: tasks.yaml must be a dictionary, got {type(tasks_config)}"
+@tool(args_schema=AskQuestionInput)
+def ask_question(question: str) -> str:
+    """Ask the user ONE short, focused question (single sentence, under 20 words).
+    Keep it concise and specific. No compound questions or follow-ups.
+    Use this to gather information before creating the team.
+    Maximum 8 questions total - stop early if you have enough context.
+    """
+    return f"Question sent to user: {question}"
 
-            # Validate structure
-            if not agents_config:
-                return "Error: agents.yaml is empty"
-            if not tasks_config:
-                return "Error: tasks.yaml is empty"
 
-            # Check agent count (3-4 total)
-            agent_count = len(agents_config)
-            if agent_count < 3 or agent_count > 4:
-                return f"Error: Must have 3-4 agents, got {agent_count}"
+@tool(args_schema=CreateTeamInput)
+def create_team_files(agents: list[dict]) -> str:
+    """Generate the final team configuration with 3-4 agents.
+    Each agent must have: key, role, goal, backstory, tools, task_description, expected_output.
+    The task_description MUST include a {prompt} placeholder.
+    One agent MUST have role=Leader.
+    """
+    try:
+        # Validate
+        if len(agents) < 3 or len(agents) > 4:
+            return f"Error: Must have 3-4 agents, got {len(agents)}"
 
-            # Validate that each task references a valid agent
-            for task_key, task_data in tasks_config.items():
-                agent_ref = task_data.get("agent")
-                if not agent_ref or agent_ref not in agents_config:
-                    return f"Error: Task '{task_key}' references unknown agent '{agent_ref}'"
+        has_leader = False
+        agents_config = {}
+        tasks_config = {}
 
-                # Check for {prompt} placeholder
-                description = task_data.get("description", "")
-                if "{prompt}" not in description:
-                    return f"Error: Task '{task_key}' description missing '{{prompt}}' placeholder"
+        allowed_tools = {"web_search", "web_scraper", "terminal", "file_writer"}
 
-            # Write files
-            with open(self.agents_path, "w") as f:
-                yaml.dump(agents_config, f, sort_keys=False, default_flow_style=False)
+        for agent in agents:
+            # Handle both dict and AgentSpec
+            if isinstance(agent, BaseModel):
+                agent = agent.model_dump()
 
-            with open(self.tasks_path, "w") as f:
-                yaml.dump(tasks_config, f, sort_keys=False, default_flow_style=False)
+            key = agent["key"]
+            role = agent["role"]
 
-            return (
-                f"SUCCESS: Team configuration has been created and saved. "
-                f"Generated {agent_count} agents with their respective tasks. "
-                f"The team is now ready to be deployed."
-            )
+            if "leader" in role.lower():
+                has_leader = True
 
-        except yaml.YAMLError as e:
-            return f"Error parsing YAML: {e}"
-        except Exception as e:
-            return f"Error creating team files: {e}"
+            # Validate tools
+            agent_tools = agent.get("tools", [])
+            invalid = [t for t in agent_tools if t not in allowed_tools]
+            if invalid:
+                return f"Error: Agent '{key}' has invalid tools: {invalid}"
+
+            # Validate {prompt} placeholder
+            desc = agent.get("task_description", "")
+            if "{prompt}" not in desc:
+                return f"Error: Agent '{key}' task_description missing {{prompt}} placeholder"
+
+            agents_config[key] = {
+                "role": role,
+                "goal": agent["goal"],
+                "backstory": agent["backstory"],
+                "tools": agent_tools,
+            }
+
+            tasks_config[f"{key}_task"] = {
+                "description": desc,
+                "expected_output": agent.get("expected_output", ""),
+                "agent": key,
+            }
+
+        if not has_leader:
+            return "Error: One agent must have role=Leader"
+
+        # Write files
+        agents_path = _dir / "agents.yaml"
+        tasks_path = _dir / "tasks.yaml"
+
+        with open(agents_path, "w") as f:
+            yaml.dump(agents_config, f, sort_keys=False, default_flow_style=False)
+
+        with open(tasks_path, "w") as f:
+            yaml.dump(tasks_config, f, sort_keys=False, default_flow_style=False)
+
+        return f"SUCCESS: Team created with {len(agents)} agents. Configuration saved."
+
+    except Exception as e:
+        return f"Error creating team: {e}"
+
+
+@tool(args_schema=CreateDelegationPlanInput)
+def create_delegation_plan(tasks: list[dict]) -> str:
+    """Create a delegation plan specifying which tasks to run, their order, and parallelization.
+    Each task entry needs: task_key, async_execution (bool), dependencies (list of task keys).
+    Tasks with no dependencies can run in parallel.
+    Tasks with dependencies wait for those tasks to complete first.
+    """
+    try:
+        # Validate
+        if not tasks:
+            return "Error: delegation plan must have at least one task"
+
+        # Load current task config for validation
+        tasks_path = _dir / "tasks.yaml"
+        if not tasks_path.exists():
+            return "Error: tasks.yaml not found"
+
+        with open(tasks_path, "r") as f:
+            tasks_config = yaml.safe_load(f)
+
+        plan_tasks = []
+        task_keys_seen = set()
+
+        for entry in tasks:
+            if isinstance(entry, BaseModel):
+                entry = entry.model_dump()
+
+            task_key = entry["task_key"]
+
+            if task_key not in tasks_config:
+                return f"Error: task_key '{task_key}' not found in tasks.yaml"
+
+            if task_key in task_keys_seen:
+                return f"Error: duplicate task_key '{task_key}'"
+            task_keys_seen.add(task_key)
+
+            deps = entry.get("dependencies", [])
+            for dep in deps:
+                if dep not in [t["task_key"] for t in tasks if isinstance(t, dict)] and dep not in task_keys_seen:
+                    # Allow forward references — they'll be validated at execution time
+                    pass
+
+            plan_tasks.append({
+                "task_key": task_key,
+                "async_execution": entry.get("async_execution", False),
+                "dependencies": deps,
+            })
+
+        # Write plan
+        plan = {"tasks": plan_tasks}
+        plan_path = _dir / "delegation_plan.yaml"
+        with open(plan_path, "w") as f:
+            yaml.dump(plan, f, sort_keys=False, default_flow_style=False)
+
+        return f"SUCCESS: Delegation plan created with {len(plan_tasks)} tasks."
+
+    except Exception as e:
+        return f"Error creating delegation plan: {e}"
 
 
 # ============================================================================
@@ -212,11 +212,10 @@ class CreateTeamFilesTool(BaseTool):
 
 
 def _load_leader_rules() -> str:
-    """Load the leader_rules.md content to use as backstory."""
+    """Load the leader_rules.md content to use as system prompt."""
     rules_path = _dir / "leader_rules.md"
     if not rules_path.exists():
         return "You are a team planning expert. Design a 3-4 agent team to solve the user's task."
-
     with open(rules_path, "r", encoding="utf-8") as f:
         return f.read()
 
@@ -260,8 +259,10 @@ def _build_conversation_context(team_description: str, history: list[dict]) -> s
 def plan_team(team_description: str, history: list[dict]) -> dict:
     """Run the Leader agent to plan a team.
 
+    Uses ChatAnthropic with tool calling for structured interaction.
+
     Args:
-        team_description: Description of the type of team needed (e.g., "software development team")
+        team_description: Description of the type of team needed
         history: List of {"role": "leader"|"user", "content": "..."} messages
 
     Returns:
@@ -270,143 +271,92 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
         {"type": "error", "message": "..."}      - if something goes wrong
     """
     try:
-        # Load leader rules
         leader_backstory = _load_leader_rules()
-
-        # Create tools
-        ask_tool = AskQuestionTool()
-        create_tool = CreateTeamFilesTool()
-
-        # Create Leader agent
-        leader = Agent(
-            role="Team Architect",
-            goal="Interview the user and design an optimal 3-4 agent team for a specific domain",
-            backstory=leader_backstory,
-            tools=[ask_tool, create_tool],
-            llm=LLM(model="claude-sonnet-4-5-20250929", api_key=os.environ.get("ANTHROPIC_API_KEY")),
-            verbose=True,
-            allow_delegation=False,
-        )
-
-        # Build conversation context
         context = _build_conversation_context(team_description, history)
 
-        # Create task for the leader
-        # CRITICAL: Tell the agent to use ONLY ONE tool to enforce one-question-at-a-time behavior
-        planning_task = Task(
-            description=(
-                f"{context}\n\n"
+        # Build LLM with tools
+        llm = ChatAnthropic(
+            model=_MODEL,
+            api_key=os.environ.get("ANTHROPIC_API_KEY"),
+            max_tokens=4096,
+        )
+
+        tools = [ask_question, create_team_files]
+        llm_with_tools = llm.bind_tools(tools)
+
+        messages = [
+            SystemMessage(content=(
+                f"{leader_backstory}\n\n"
                 "IMPORTANT: You must use ONLY ONE tool in this turn. "
                 "Either use ask_question to ask a single question, "
                 "OR use create_team_files when you're ready to generate the team. "
-                "After using the tool, your task is COMPLETE - do not take any additional actions."
-            ),
-            expected_output=(
-                "A success message from the tool you used (either 'Question has been sent' or 'Successfully created team')"
-            ),
-            agent=leader,
-        )
+                "After using the tool, stop."
+            )),
+            HumanMessage(content=context),
+        ]
 
-        # Store file paths and clear any previous question marker
-        agents_path = _dir / "agents.yaml"
-        tasks_path = _dir / "tasks.yaml"
-        question_marker = _dir / ".question_asked"
+        # Call the model
+        response = llm_with_tools.invoke(messages)
 
-        # Remove old question marker if it exists
-        if question_marker.exists():
-            question_marker.unlink()
+        # Check for tool calls
+        if response.tool_calls:
+            tool_call = response.tool_calls[0]  # Only process first tool call
 
-        agents_mtime_before = agents_path.stat().st_mtime if agents_path.exists() else 0
-        tasks_mtime_before = tasks_path.stat().st_mtime if tasks_path.exists() else 0
+            if tool_call["name"] == "ask_question":
+                question = tool_call["args"].get("question", "Could you provide more details?")
+                return {"type": "question", "message": question}
 
-        # Run the crew
-        crew = Crew(
-            agents=[leader],
-            tasks=[planning_task],
-            process=Process.sequential,
-            verbose=True,
-            planning=False,  # Disable planning to avoid OpenAI dependency
-        )
+            elif tool_call["name"] == "create_team_files":
+                # Execute the tool to write files
+                agents_data = tool_call["args"].get("agents", [])
+                result = create_team_files.invoke({"agents": agents_data})
 
-        result = crew.kickoff()
-        output = str(result).strip()
+                if "SUCCESS" in result:
+                    # Reload and return the created team
+                    agents_path = _dir / "agents.yaml"
+                    tasks_path = _dir / "tasks.yaml"
 
-        # Check what happened during execution (priority order matters!)
+                    with open(agents_path, "r") as f:
+                        agents_config = yaml.safe_load(f)
+                    with open(tasks_path, "r") as f:
+                        tasks_config = yaml.safe_load(f)
 
-        # 1. Check if a question was asked (highest priority - stop immediately)
-        if question_marker.exists():
-            with open(question_marker, "r") as f:
-                question = f.read().strip()
-            question_marker.unlink()  # Clean up
-            return {"type": "question", "message": question}
+                    agents = []
+                    for agent_id, agent_data in agents_config.items():
+                        role = agent_data.get("role", "")
+                        if "leader" in role.lower():
+                            continue
 
-        # 2. Check if YAML files were written (team was created)
-        agents_mtime_after = agents_path.stat().st_mtime if agents_path.exists() else 0
-        tasks_mtime_after = tasks_path.stat().st_mtime if tasks_path.exists() else 0
+                        task_data = None
+                        for task_key, t in tasks_config.items():
+                            if t.get("agent") == agent_id:
+                                task_data = t
+                                break
 
-        files_were_written = (
-            agents_mtime_after > agents_mtime_before or
-            tasks_mtime_after > tasks_mtime_before
-        )
+                        agents.append({
+                            "role": agent_data.get("role", ""),
+                            "goal": agent_data.get("goal", ""),
+                            "backstory": agent_data.get("backstory", ""),
+                            "task_description": task_data.get("description", "") if task_data else "",
+                            "expected_output": task_data.get("expected_output", "") if task_data else "",
+                            "tools": agent_data.get("tools", []),
+                        })
 
-        if files_were_written:
-            # Leader created the team - reload the YAML files and return agents
-            with open(agents_path, "r") as f:
-                agents_config = yaml.safe_load(f)
-            with open(tasks_path, "r") as f:
-                tasks_config = yaml.safe_load(f)
+                    return {"type": "team", "agents": agents}
+                else:
+                    return {"type": "error", "message": result}
 
-            # Convert to frontend format (exclude Leader - frontend handles it)
-            agents = []
-            for agent_id, agent_data in agents_config.items():
-                # Skip the Leader agent (frontend already has it)
-                role = agent_data.get("role", "")
-                if "leader" in role.lower():
-                    continue
-
-                # Find the task for this agent
-                task_data = None
-                for task_key, t in tasks_config.items():
-                    if t.get("agent") == agent_id:
-                        task_data = t
-                        break
-
-                agents.append({
-                    "role": agent_data.get("role", ""),
-                    "goal": agent_data.get("goal", ""),
-                    "backstory": agent_data.get("backstory", ""),
-                    "task_description": task_data.get("description", "") if task_data else "",
-                    "expected_output": task_data.get("expected_output", "") if task_data else "",
-                    "tools": agent_data.get("tools", []),
-                })
-
-            return {"type": "team", "agents": agents}
-
-        elif "__QUESTION__:" in output:
-            # Leader asked a question (marker found in output)
-            question = output.split("__QUESTION__:", 1)[1].strip()
-            return {"type": "question", "message": question}
-
-        else:
-            # Extract the last question from verbose output or use fallback
-            # CrewAI often doesn't preserve tool markers in final output
-            # So we'll try to extract the actual question from the output
-            lines = output.split('\n')
-            for line in reversed(lines):
-                line = line.strip()
-                if line and '?' in line and len(line) < 500:
-                    return {"type": "question", "message": line}
-
-            # Final fallback
-            return {
-                "type": "question",
-                "message": "Could you provide more details about your task?"
-            }
+        # No tool call — the model responded with plain text instead of using a tool.
+        # Ask the user a generic follow-up rather than trying to parse the text.
+        return {
+            "type": "question",
+            "message": "Could you provide more details about your task?",
+        }
 
     except Exception as e:
         return {
             "type": "error",
-            "message": f"Planning error: {str(e)}"
+            "message": f"Planning error: {str(e)}",
         }
 
 
@@ -417,6 +367,8 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
 
 def plan_task_delegation(task_prompt: str) -> dict:
     """Let the Leader analyze a specific task and create a delegation plan.
+
+    Uses ChatAnthropic with tool calling for structured output.
 
     Args:
         task_prompt: The specific task the user wants the team to execute
@@ -440,7 +392,7 @@ def plan_task_delegation(task_prompt: str) -> dict:
         if not agents_path.exists() or not tasks_path.exists():
             return {
                 "type": "error",
-                "message": "Team configuration not found. Please create a team first."
+                "message": "Team configuration not found. Please create a team first.",
             }
 
         with open(agents_path, "r") as f:
@@ -449,7 +401,7 @@ def plan_task_delegation(task_prompt: str) -> dict:
         with open(tasks_path, "r") as f:
             tasks_config = yaml.safe_load(f)
 
-        # Build context with team info and task
+        # Build context with team info
         team_context = "## Available Team\n\n### Agents:\n"
         for agent_key, agent_data in agents_config.items():
             team_context += f"\n**{agent_key}**:\n"
@@ -462,70 +414,61 @@ def plan_task_delegation(task_prompt: str) -> dict:
             team_context += f"- Agent: {task_data['agent']}\n"
             team_context += f"- Description: {task_data['description']}\n"
 
-        # Create Leader agent with delegation planning capability
-        leader = Agent(
-            role="Task Delegation Planner",
-            goal="Analyze the specific task and create an optimal delegation plan",
-            backstory=f"{delegation_rules}\n\n## Your Task\n\nAnalyze the user's specific task and determine:\n1. Which task templates are needed\n2. Which tasks can run in parallel\n3. Which tasks have dependencies\n\n{team_context}",
-            tools=[CreateDelegationPlanTool()],
-            llm=LLM(model="claude-sonnet-4-5-20250929", api_key=os.environ.get("ANTHROPIC_API_KEY")),
-            verbose=True,
-            allow_delegation=False,
+        # Build LLM with delegation plan tool
+        llm = ChatAnthropic(
+            model=_MODEL,
+            api_key=os.environ.get("ANTHROPIC_API_KEY"),
+            max_tokens=4096,
         )
 
-        # Create planning task
-        planning_task = Task(
-            description=(
+        tools = [create_delegation_plan]
+        llm_with_tools = llm.bind_tools(tools)
+
+        system_content = (
+            f"{delegation_rules}\n\n"
+            "You are the Task Delegation Planner. Analyze the user's task and create "
+            "an optimal delegation plan.\n\n"
+            f"{team_context}\n\n"
+            "IMPORTANT:\n"
+            "- Tasks with NO dependencies can run in TRUE PARALLEL\n"
+            "- Use dependencies only when a task genuinely needs another's output\n"
+            "- Maximize parallelism for faster execution\n"
+            "- Use the create_delegation_plan tool to output your plan"
+        )
+
+        messages = [
+            SystemMessage(content=system_content),
+            HumanMessage(content=(
                 f"User's specific task: {task_prompt}\n\n"
-                f"Create a delegation plan that specifies:\n"
-                f"1. Which task templates to execute (select from available templates)\n"
-                f"2. Execution order based on dependencies\n"
-                f"3. Which tasks must wait for others (use dependencies field)\n\n"
-                f"CRITICAL RULES:\n"
-                f"- ALL tasks MUST have async_execution=false (required due to CrewAI bug)\n"
-                f"- Use dependencies field to control execution order\n"
-                f"- Tasks with NO dependencies will run first\n"
-                f"- Tasks with dependencies will wait for those tasks to complete\n\n"
-                f"Use the create_delegation_plan tool to output your plan."
-            ),
-            expected_output=(
-                "Success message confirming the delegation plan was created"
-            ),
-            agent=leader,
-        )
+                "Create a delegation plan. Use the create_delegation_plan tool."
+            )),
+        ]
 
-        # Store file paths
-        plan_path = _dir / "delegation_plan.yaml"
-        plan_mtime_before = plan_path.stat().st_mtime if plan_path.exists() else 0
+        response = llm_with_tools.invoke(messages)
 
-        # Run the planning crew
-        crew = Crew(
-            agents=[leader],
-            tasks=[planning_task],
-            process=Process.sequential,
-            verbose=True,
-            planning=False,
-        )
+        # Process tool call
+        if response.tool_calls:
+            tool_call = response.tool_calls[0]
 
-        result = crew.kickoff()
+            if tool_call["name"] == "create_delegation_plan":
+                tasks_data = tool_call["args"].get("tasks", [])
+                result = create_delegation_plan.invoke({"tasks": tasks_data})
 
-        # Check if plan was created
-        plan_mtime_after = plan_path.stat().st_mtime if plan_path.exists() else 0
+                if "SUCCESS" in result:
+                    plan_path = _dir / "delegation_plan.yaml"
+                    with open(plan_path, "r") as f:
+                        plan = yaml.safe_load(f)
+                    return {"type": "plan", "plan": plan}
+                else:
+                    return {"type": "error", "message": result}
 
-        if plan_mtime_after > plan_mtime_before:
-            # Plan was created - load and return it
-            with open(plan_path, "r") as f:
-                plan = yaml.safe_load(f)
-
-            return {"type": "plan", "plan": plan}
-        else:
-            return {
-                "type": "error",
-                "message": "Leader did not create a delegation plan"
-            }
+        return {
+            "type": "error",
+            "message": "Leader did not create a delegation plan",
+        }
 
     except Exception as e:
         return {
             "type": "error",
-            "message": f"Delegation planning error: {str(e)}"
+            "message": f"Delegation planning error: {str(e)}",
         }
