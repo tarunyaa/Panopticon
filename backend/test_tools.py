@@ -22,12 +22,11 @@ def test_imports():
     print("=" * 60)
 
     modules = [
-        ("events", "from events import event_bus, EventBus"),
+        ("events", "from events import GatingMode, GateResponse, RunStartedEvent"),
         ("tools", "from tools import get_available_tools, terminal"),
         ("planner", "from planner import plan_team, plan_task_delegation"),
-        ("graph", "from graph import run_graph"),
+        ("graph", "from graph import build_execution_graph, _summarize_output"),
         ("gate_policy", "from gate_policy import should_gate_task_complete"),
-        ("activity_callbacks", "from activity_callbacks import ActivityTracker"),
     ]
 
     all_ok = True

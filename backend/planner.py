@@ -1,6 +1,7 @@
 """LangChain-powered Leader agent that plans teams and task delegation.
 
-Replaces CrewAI-based planner with direct ChatAnthropic + tool calling.
+Uses ChatAnthropic with tool calling (team building) and
+with_structured_output (delegation planning).
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
@@ -144,66 +145,6 @@ def create_team_files(agents: list[dict]) -> str:
 
     except Exception as e:
         return f"Error creating team: {e}"
-
-
-@tool(args_schema=CreateDelegationPlanInput)
-def create_delegation_plan(tasks: list[dict]) -> str:
-    """Create a delegation plan specifying which tasks to run, their order, and parallelization.
-    Each task entry needs: task_key, async_execution (bool), dependencies (list of task keys).
-    Tasks with no dependencies can run in parallel.
-    Tasks with dependencies wait for those tasks to complete first.
-    """
-    try:
-        # Validate
-        if not tasks:
-            return "Error: delegation plan must have at least one task"
-
-        # Load current task config for validation
-        tasks_path = _dir / "tasks.yaml"
-        if not tasks_path.exists():
-            return "Error: tasks.yaml not found"
-
-        with open(tasks_path, "r") as f:
-            tasks_config = yaml.safe_load(f)
-
-        plan_tasks = []
-        task_keys_seen = set()
-
-        for entry in tasks:
-            if isinstance(entry, BaseModel):
-                entry = entry.model_dump()
-
-            task_key = entry["task_key"]
-
-            if task_key not in tasks_config:
-                return f"Error: task_key '{task_key}' not found in tasks.yaml"
-
-            if task_key in task_keys_seen:
-                return f"Error: duplicate task_key '{task_key}'"
-            task_keys_seen.add(task_key)
-
-            deps = entry.get("dependencies", [])
-            for dep in deps:
-                if dep not in [t["task_key"] for t in tasks if isinstance(t, dict)] and dep not in task_keys_seen:
-                    # Allow forward references — they'll be validated at execution time
-                    pass
-
-            plan_tasks.append({
-                "task_key": task_key,
-                "async_execution": entry.get("async_execution", False),
-                "dependencies": deps,
-            })
-
-        # Write plan
-        plan = {"tasks": plan_tasks}
-        plan_path = _dir / "delegation_plan.yaml"
-        with open(plan_path, "w") as f:
-            yaml.dump(plan, f, sort_keys=False, default_flow_style=False)
-
-        return f"SUCCESS: Delegation plan created with {len(plan_tasks)} tasks."
-
-    except Exception as e:
-        return f"Error creating delegation plan: {e}"
 
 
 # ============================================================================
@@ -368,7 +309,7 @@ def plan_team(team_description: str, history: list[dict]) -> dict:
 def plan_task_delegation(task_prompt: str) -> dict:
     """Let the Leader analyze a specific task and create a delegation plan.
 
-    Uses ChatAnthropic with tool calling for structured output.
+    Uses ChatAnthropic with with_structured_output for guaranteed schema conformance.
 
     Args:
         task_prompt: The specific task the user wants the team to execute
@@ -414,58 +355,60 @@ def plan_task_delegation(task_prompt: str) -> dict:
             team_context += f"- Agent: {task_data['agent']}\n"
             team_context += f"- Description: {task_data['description']}\n"
 
-        # Build LLM with delegation plan tool
+        # Build LLM with guaranteed structured output
         llm = ChatAnthropic(
             model=_MODEL,
             api_key=os.environ.get("ANTHROPIC_API_KEY"),
             max_tokens=4096,
         )
 
-        tools = [create_delegation_plan]
-        llm_with_tools = llm.bind_tools(tools)
+        structured_llm = llm.with_structured_output(CreateDelegationPlanInput)
 
         system_content = (
             f"{delegation_rules}\n\n"
             "You are the Task Delegation Planner. Analyze the user's task and create "
             "an optimal delegation plan.\n\n"
             f"{team_context}\n\n"
-            "IMPORTANT:\n"
-            "- Tasks with NO dependencies can run in TRUE PARALLEL\n"
-            "- Use dependencies only when a task genuinely needs another's output\n"
-            "- Maximize parallelism for faster execution\n"
-            "- Use the create_delegation_plan tool to output your plan"
+            "IMPORTANT — PARALLELISM RULES:\n"
+            "- Your DEFAULT must be dependencies: [] (parallel). Only add a dependency "
+            "when a task literally cannot start without reading another task's finished output.\n"
+            "- Agents with different specialties (researcher vs strategist, analyst vs designer, "
+            "frontend vs backend) should ALMOST ALWAYS run in parallel.\n"
+            "- NEVER chain agents sequentially just because they work on the same topic.\n"
+            "- Ask: 'Does agent B need to READ agent A's output text?' If no → parallel."
         )
 
         messages = [
             SystemMessage(content=system_content),
-            HumanMessage(content=(
-                f"User's specific task: {task_prompt}\n\n"
-                "Create a delegation plan. Use the create_delegation_plan tool."
-            )),
+            HumanMessage(content=f"User's specific task: {task_prompt}"),
         ]
 
-        response = llm_with_tools.invoke(messages)
+        plan_input: CreateDelegationPlanInput = structured_llm.invoke(messages)
 
-        # Process tool call
-        if response.tool_calls:
-            tool_call = response.tool_calls[0]
+        # Validate task keys and build plan
+        plan_tasks = []
+        task_keys_seen: set[str] = set()
 
-            if tool_call["name"] == "create_delegation_plan":
-                tasks_data = tool_call["args"].get("tasks", [])
-                result = create_delegation_plan.invoke({"tasks": tasks_data})
+        for entry in plan_input.tasks:
+            if entry.task_key not in tasks_config:
+                return {"type": "error", "message": f"task_key '{entry.task_key}' not found in tasks.yaml"}
+            if entry.task_key in task_keys_seen:
+                return {"type": "error", "message": f"duplicate task_key '{entry.task_key}'"}
+            task_keys_seen.add(entry.task_key)
 
-                if "SUCCESS" in result:
-                    plan_path = _dir / "delegation_plan.yaml"
-                    with open(plan_path, "r") as f:
-                        plan = yaml.safe_load(f)
-                    return {"type": "plan", "plan": plan}
-                else:
-                    return {"type": "error", "message": result}
+            plan_tasks.append({
+                "task_key": entry.task_key,
+                "async_execution": entry.async_execution,
+                "dependencies": entry.dependencies,
+            })
 
-        return {
-            "type": "error",
-            "message": "Leader did not create a delegation plan",
-        }
+        # Write plan
+        plan = {"tasks": plan_tasks}
+        plan_path = _dir / "delegation_plan.yaml"
+        with open(plan_path, "w") as f:
+            yaml.dump(plan, f, sort_keys=False, default_flow_style=False)
+
+        return {"type": "plan", "plan": plan}
 
     except Exception as e:
         return {

@@ -2,12 +2,14 @@
 
 Builds a dynamic StateGraph from the delegation plan and runs worker agents
 via create_react_agent. Parallel fan-out / fan-in is handled natively by
-LangGraph's edge semantics.
+LangGraph's edge semantics. Events are streamed via astream_events(v2).
 """
 from __future__ import annotations
 
+import operator
 import os
 import re
+import uuid
 import yaml
 from typing import Any, Annotated
 from typing_extensions import TypedDict
@@ -17,44 +19,20 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import create_react_agent
+from langgraph.types import interrupt, Command
+from langgraph.checkpoint.memory import MemorySaver
+
+try:
+    from .tools import instantiate_tools
+    from .gate_policy import should_gate_task_complete
+    from .events import GatingMode
+except ImportError:
+    from tools import instantiate_tools
+    from gate_policy import should_gate_task_complete
+    from events import GatingMode
 
 # Load .env from project root
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-
-try:
-    from .events import (
-        event_bus,
-        gate_store,
-        AgentIntentEvent,
-        TaskSummaryEvent,
-        GateRequestedEvent,
-        RunStartedEvent,
-        RunFinishedEvent,
-        ErrorEvent,
-        TaskHandoffEvent,
-        GatingMode,
-    )
-    from .tools import instantiate_tools
-    from .planner import plan_task_delegation
-    from .gate_policy import should_gate_task_complete
-    from .activity_callbacks import ActivityTracker
-except ImportError:
-    from events import (
-        event_bus,
-        gate_store,
-        AgentIntentEvent,
-        TaskSummaryEvent,
-        GateRequestedEvent,
-        RunStartedEvent,
-        RunFinishedEvent,
-        ErrorEvent,
-        TaskHandoffEvent,
-        GatingMode,
-    )
-    from tools import instantiate_tools
-    from planner import plan_task_delegation
-    from gate_policy import should_gate_task_complete
-    from activity_callbacks import ActivityTracker
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -65,15 +43,19 @@ _MODEL = "claude-sonnet-4-5-20250929"
 # State
 # ---------------------------------------------------------------------------
 
-def _merge_dicts(a: dict, b: dict) -> dict:
-    return {**a, **b}
+class TaskOutput(TypedDict):
+    task_key: str
+    agent_name: str
+    output: str
 
 
 class PanopticonState(TypedDict):
-    run_id: str
     prompt: str
+    run_id: str
     gating_mode: str
-    task_outputs: Annotated[dict, _merge_dicts]
+    task_outputs: Annotated[list[TaskOutput], operator.add]
+    total_tasks: int
+    final_output: str
 
 
 # ---------------------------------------------------------------------------
@@ -98,55 +80,31 @@ def _summarize_output(text: str, limit: int = 160) -> str:
 # Worker node factory
 # ---------------------------------------------------------------------------
 
-def _make_worker_node(
+def make_worker_node(
+    task_key: str,
     agent_key: str,
     agent_config: dict,
     task_config: dict,
-    task_key: str,
-    dependencies: list[str],
+    deps: list[str],
     task_agent_map: dict[str, str],
     mode: GatingMode,
     task_index: int,
     total_tasks: int,
 ):
-    """Return a closure that runs a single worker agent inside the StateGraph."""
+    """Return an async closure that runs a single worker agent inside the StateGraph."""
 
     agent_name = agent_key.replace("_", " ").title()
 
-    def worker_node(state: PanopticonState) -> dict[str, Any]:
+    async def worker_node(state: PanopticonState) -> dict[str, Any]:
         run_id = state["run_id"]
         prompt = state["prompt"]
 
-        # Emit handoff event if this task has dependencies
-        source_agents = [task_agent_map[d] for d in dependencies if d in task_agent_map]
-        if source_agents:
-            event_bus.emit(
-                run_id,
-                TaskHandoffEvent(
-                    receivingAgent=agent_name,
-                    sourceAgents=source_agents,
-                    summary=f"Receiving outputs from {', '.join(source_agents)}",
-                ),
-            )
-
-        # Emit intent event
-        event_bus.emit(
-            run_id,
-            AgentIntentEvent(
-                agentName=agent_name,
-                zone="WORKSHOP",
-                message=f"Started working as {agent_config['role'].strip().lower()}.",
-            ),
-        )
-
         # Build tools and LLM
         agent_tools = instantiate_tools(agent_config.get("tools", []))
-        activity_tracker = ActivityTracker(run_id, agent_name)
 
         llm = ChatAnthropic(
             model=_MODEL,
             api_key=os.environ.get("ANTHROPIC_API_KEY"),
-            callbacks=[activity_tracker],
             max_tokens=4096,
         )
 
@@ -175,11 +133,13 @@ def _make_worker_node(
 
         # Append context from dependencies
         context_parts = []
-        task_outputs = state.get("task_outputs", {})
-        for dep_key in dependencies:
-            if dep_key in task_outputs:
-                dep_agent = task_agent_map.get(dep_key, dep_key)
-                context_parts.append(f"--- Output from {dep_agent} ---\n{task_outputs[dep_key]}")
+        task_outputs = state.get("task_outputs", [])
+        for dep_key in deps:
+            for to in task_outputs:
+                if to["task_key"] == dep_key:
+                    dep_agent = task_agent_map.get(dep_key, dep_key)
+                    context_parts.append(f"--- Output from {dep_agent} ---\n{to['output']}")
+                    break
 
         if context_parts:
             desc += "\n\n## Context from previous agents\n\n" + "\n\n".join(context_parts)
@@ -195,7 +155,10 @@ def _make_worker_node(
             prompt=system_msg,
         )
 
-        result = react_agent.invoke({"messages": [HumanMessage(content=desc)]})
+        result = await react_agent.ainvoke(
+            {"messages": [HumanMessage(content=desc)]},
+            config={"tags": [f"worker:{task_key}"]},
+        )
 
         # Extract final output from last AI message
         final_output = ""
@@ -206,17 +169,6 @@ def _make_worker_node(
         if not final_output:
             final_output = str(result["messages"][-1].content) if result["messages"] else "(no output)"
 
-        # Emit task summary
-        summary = _summarize_output(final_output)
-        event_bus.emit(
-            run_id,
-            TaskSummaryEvent(
-                agentName=agent_name,
-                summary=summary,
-                fullOutput=final_output,
-            ),
-        )
-
         # Gate logic
         is_last = task_index == total_tasks - 1
         should_gate, reason = should_gate_task_complete(
@@ -226,211 +178,182 @@ def _make_worker_node(
         )
 
         if should_gate:
-            gate_id, gate_event = gate_store.create_gate(run_id)
+            gate_id = str(uuid.uuid4())
+            summary = _summarize_output(final_output)
 
             question = f"{agent_name} finished their task. Continue?"
             if is_last:
                 question = "Final deliverable ready. Approve?"
 
-            event_bus.emit(
-                run_id,
-                GateRequestedEvent(
-                    gateId=gate_id,
-                    runId=run_id,
-                    agentName=agent_name,
-                    question=question,
-                    context=summary,
-                    reason=reason,
-                    gateSource="task_complete",
-                ),
-            )
+            # interrupt() suspends the graph — the WebSocket handler will
+            # read this payload from state.tasks[*].interrupts[*].value
+            # and send a GATE_REQUESTED event to the frontend.
+            decision = interrupt({
+                "gate_id": gate_id,
+                "run_id": run_id,
+                "agent_name": agent_name,
+                "question": question,
+                "context": summary,
+                "reason": reason,
+                "gate_source": "task_complete",
+            })
 
-            resolved = gate_event.wait(600)
-            if not resolved:
-                raise RuntimeError(f"Gate timed out for {agent_name} (10 min)")
-
-            gate_response = gate_store.get_response(run_id, gate_id)
-            if gate_response is None or gate_response.action == "reject":
+            # When resumed, `decision` is whatever Command(resume=...) passed.
+            if isinstance(decision, dict) and decision.get("action") == "reject":
                 raise RuntimeError(f"Run rejected by user at {agent_name}'s gate")
 
-        return {"task_outputs": {task_key: final_output}}
+            # Append human feedback to output so downstream tasks see it
+            note = decision.get("note", "") if isinstance(decision, dict) else ""
+            if note:
+                final_output += f"\n\n[Human feedback]: {note}"
+
+        return {"task_outputs": [{"task_key": task_key, "agent_name": agent_name, "output": final_output}]}
 
     return worker_node
+
+
+# ---------------------------------------------------------------------------
+# Synthesize node
+# ---------------------------------------------------------------------------
+
+async def synthesize_node(state: PanopticonState) -> dict[str, Any]:
+    """Combine all task outputs into a single final deliverable."""
+    task_outputs = state.get("task_outputs", [])
+    prompt = state["prompt"]
+
+    if len(task_outputs) <= 1:
+        # Single task — just pass the output through
+        final = task_outputs[0]["output"] if task_outputs else "(no output)"
+        return {"final_output": final}
+
+    # Multiple tasks — synthesize via LLM
+    llm = ChatAnthropic(
+        model=_MODEL,
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        max_tokens=4096,
+    )
+
+    all_outputs = "\n\n".join(
+        f"## {to['agent_name']}\n{to['output']}"
+        for to in task_outputs
+    )
+
+    synthesis_msg = await llm.ainvoke([
+        SystemMessage(content=(
+            "You are a team leader synthesizing outputs from your team members. "
+            "Combine the following agent outputs into a single, cohesive final deliverable. "
+            "Maintain the depth and detail of each contribution while creating a unified document."
+        )),
+        HumanMessage(content=(
+            f"Original request: {prompt}\n\n"
+            f"## Agent Outputs\n\n{all_outputs}\n\n"
+            f"Synthesize these into a complete, polished final deliverable."
+        )),
+    ])
+
+    final = synthesis_msg.content if isinstance(synthesis_msg.content, str) else str(synthesis_msg.content)
+    return {"final_output": final}
 
 
 # ---------------------------------------------------------------------------
 # Graph construction
 # ---------------------------------------------------------------------------
 
-def _build_graph(
-    exec_tasks: list[dict],
+def build_execution_graph(
+    delegation_plan: dict,
     agents_config: dict,
     tasks_config: dict,
-    task_agent_map: dict[str, str],
-    mode: GatingMode,
-) -> StateGraph:
-    """Build a StateGraph from the delegation plan's executable tasks."""
+    gating_mode: GatingMode,
+) -> tuple[Any, dict[str, dict]]:
+    """Build and compile a StateGraph from the delegation plan.
 
-    graph = StateGraph(PanopticonState)
+    Returns:
+        (compiled_graph, node_meta) where node_meta maps task_key to
+        {"agent_name": ..., "role": ..., "deps": [...], "dep_agents": [...]}.
+    """
+    planned_tasks = delegation_plan.get("tasks", [])
+
+    # Identify the Leader agent (skip from execution)
+    leader_key = None
+    for key, config in agents_config.items():
+        if "leader" in config.get("role", "").lower():
+            leader_key = key
+            break
+
+    # Filter out leader tasks
+    exec_tasks = [
+        t for t in planned_tasks
+        if t["task_key"] in tasks_config
+        and tasks_config[t["task_key"]].get("agent") != leader_key
+    ]
+
+    if not exec_tasks:
+        raise ValueError("No executable tasks after filtering leader tasks")
+
+    # Build task -> agent name mapping
+    task_agent_map: dict[str, str] = {}
+    for t in exec_tasks:
+        agent_key = tasks_config[t["task_key"]]["agent"]
+        task_agent_map[t["task_key"]] = agent_key.replace("_", " ").title()
+
     total_tasks = len(exec_tasks)
     task_keys = {t["task_key"] for t in exec_tasks}
-
-    # Track which tasks are depended on (to find terminal tasks)
     depended_on: set[str] = set()
+
+    builder = StateGraph(PanopticonState)
+
+    # Build node_meta for translate_event
+    node_meta: dict[str, dict] = {}
 
     for i, plan_entry in enumerate(exec_tasks):
         task_key = plan_entry["task_key"]
         task_cfg = tasks_config[task_key]
         agent_key = task_cfg["agent"]
         agent_cfg = agents_config[agent_key]
-        deps = [d for d in plan_entry.get("dependencies", []) if d in task_keys]
+        entry_deps = [d for d in plan_entry.get("dependencies", []) if d in task_keys]
 
-        # Add node
-        node_fn = _make_worker_node(
+        agent_name = agent_key.replace("_", " ").title()
+        dep_agents = [task_agent_map[d] for d in entry_deps if d in task_agent_map]
+
+        node_meta[task_key] = {
+            "agent_name": agent_name,
+            "role": agent_cfg.get("role", ""),
+            "deps": entry_deps,
+            "dep_agents": dep_agents,
+        }
+
+        worker_fn = make_worker_node(
+            task_key=task_key,
             agent_key=agent_key,
             agent_config=agent_cfg,
             task_config=task_cfg,
-            task_key=task_key,
-            dependencies=deps,
+            deps=entry_deps,
             task_agent_map=task_agent_map,
-            mode=mode,
+            mode=gating_mode,
             task_index=i,
             total_tasks=total_tasks,
         )
-        graph.add_node(task_key, node_fn)
+        builder.add_node(task_key, worker_fn)
 
-        # Add edges
-        if not deps:
-            graph.add_edge(START, task_key)
+        if not entry_deps:
+            builder.add_edge(START, task_key)
         else:
-            for dep_key in deps:
-                graph.add_edge(dep_key, task_key)
+            for dep_key in entry_deps:
+                builder.add_edge(dep_key, task_key)
                 depended_on.add(dep_key)
 
-    # Terminal tasks → END
+    # Add synthesize node
+    builder.add_node("synthesize", synthesize_node)
+
+    # Terminal tasks -> synthesize
     for t in exec_tasks:
         if t["task_key"] not in depended_on:
-            graph.add_edge(t["task_key"], END)
+            builder.add_edge(t["task_key"], "synthesize")
 
-    return graph
+    builder.add_edge("synthesize", END)
 
+    # Compile with MemorySaver for interrupt/resume support
+    checkpointer = MemorySaver()
+    compiled = builder.compile(checkpointer=checkpointer)
 
-# ---------------------------------------------------------------------------
-# Main orchestration
-# ---------------------------------------------------------------------------
-
-def _build_and_run_graph(run_id: str, prompt: str, mode: GatingMode) -> str:
-    """Build the StateGraph from delegation plan and execute it."""
-
-    # Read YAML configs
-    with open(os.path.join(_dir, "agents.yaml"), "r") as f:
-        agents_config = yaml.safe_load(f)
-
-    with open(os.path.join(_dir, "tasks.yaml"), "r") as f:
-        tasks_config = yaml.safe_load(f)
-
-    event_bus.emit(run_id, RunStartedEvent(runId=run_id, prompt=prompt))
-
-    try:
-        # Step 1: Get delegation plan from planner
-        delegation_result = plan_task_delegation(prompt)
-
-        if delegation_result["type"] == "error":
-            raise ValueError(f"Delegation planning failed: {delegation_result['message']}")
-
-        delegation_plan = delegation_result["plan"]
-        planned_tasks = delegation_plan.get("tasks", [])
-
-        if not planned_tasks:
-            raise ValueError("Delegation plan has no tasks")
-
-        # Identify the Leader agent (skip from execution)
-        leader_key = None
-        for key, config in agents_config.items():
-            if "leader" in config.get("role", "").lower():
-                leader_key = key
-                break
-
-        # Filter out leader tasks
-        exec_tasks = [
-            t for t in planned_tasks
-            if t["task_key"] in tasks_config
-            and tasks_config[t["task_key"]].get("agent") != leader_key
-        ]
-
-        if not exec_tasks:
-            raise ValueError("No executable tasks after filtering leader tasks")
-
-        # Build task→agent mapping
-        task_agent_map: dict[str, str] = {}
-        for t in exec_tasks:
-            agent_key = tasks_config[t["task_key"]]["agent"]
-            task_agent_map[t["task_key"]] = agent_key.replace("_", " ").title()
-
-        # Step 2: Build and compile the StateGraph
-        graph = _build_graph(exec_tasks, agents_config, tasks_config, task_agent_map, mode)
-        compiled = graph.compile()
-
-        # Step 3: Run the graph (sync — LangGraph manages threads internally)
-        final_state = compiled.invoke({
-            "run_id": run_id,
-            "prompt": prompt,
-            "gating_mode": mode,
-            "task_outputs": {},
-        })
-
-        context_results = final_state.get("task_outputs", {})
-
-        # Step 4: Synthesize final output
-        last_task_key = exec_tasks[-1]["task_key"]
-        final_output = context_results.get(last_task_key, "")
-
-        if len(exec_tasks) > 1 and final_output:
-            llm = ChatAnthropic(
-                model=_MODEL,
-                api_key=os.environ.get("ANTHROPIC_API_KEY"),
-                max_tokens=4096,
-            )
-
-            all_outputs = "\n\n".join(
-                f"## {task_agent_map.get(t['task_key'], t['task_key'])}\n{context_results.get(t['task_key'], '(no output)')}"
-                for t in exec_tasks
-            )
-
-            synthesis_msg = llm.invoke([
-                SystemMessage(content=(
-                    "You are a team leader synthesizing outputs from your team members. "
-                    "Combine the following agent outputs into a single, cohesive final deliverable. "
-                    "Maintain the depth and detail of each contribution while creating a unified document."
-                )),
-                HumanMessage(content=(
-                    f"Original request: {prompt}\n\n"
-                    f"## Agent Outputs\n\n{all_outputs}\n\n"
-                    f"Synthesize these into a complete, polished final deliverable."
-                )),
-            ])
-
-            final_output = synthesis_msg.content if isinstance(synthesis_msg.content, str) else str(synthesis_msg.content)
-
-        event_bus.emit(run_id, RunFinishedEvent(runId=run_id))
-        return final_output
-
-    except Exception as e:
-        event_bus.emit(run_id, ErrorEvent(message=str(e)))
-        event_bus.emit(run_id, RunFinishedEvent(runId=run_id))
-        return f"Error: {e}"
-    finally:
-        gate_store.cleanup(run_id)
-
-
-def run_graph(run_id: str, prompt: str, mode: GatingMode = "BALANCED") -> str:
-    """Build and run the agent graph, emitting events along the way.
-
-    This is the synchronous entry point called from main.py's thread pool.
-
-    Args:
-        run_id: Unique identifier for this run
-        prompt: User's task prompt
-        mode: Gating mode (STRICT, BALANCED, AUTO)
-    """
-    return _build_and_run_graph(run_id, prompt, mode)
+    return compiled, node_meta

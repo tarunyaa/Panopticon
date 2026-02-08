@@ -12,8 +12,6 @@ export interface AgentDef {
   zone?: string;
 }
 
-export type AgentActivity = "idle" | "tool_call" | "llm_generating";
-
 export interface AgentEntry {
   def: AgentDef;
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -27,10 +25,8 @@ export interface AgentEntry {
   speechBg?: Phaser.GameObjects.Graphics;
   speechText?: Phaser.GameObjects.Text;
   speechTimer: number;
-  activity: AgentActivity;
-  activityDetails: string;
-  activityIcon?: Phaser.GameObjects.Text;
-  tooltip?: Phaser.GameObjects.Container;
+  activity: string;          // "idle" | "tool_call" | "llm_generating"
+  activityIcon?: Phaser.GameObjects.Arc;
 }
 
 const BAR_WIDTH = 50;
@@ -102,7 +98,13 @@ export class AgentRegistry {
         align: "center",
       })
       .setOrigin(0.5, 1)
-      .setDepth(11);
+      .setDepth(11)
+      .setVisible(false);
+
+    // Show name/role on hover
+    sprite.setInteractive({ useHandCursor: true });
+    sprite.on("pointerover", () => label.setVisible(true));
+    sprite.on("pointerout", () => label.setVisible(false));
 
     const barY = y + 36;
     const barBg = this.scene.add
@@ -115,26 +117,10 @@ export class AgentRegistry {
       .setOrigin(0, 0.5)
       .setDepth(12);
 
-    // Activity icon (rendered above sprite head) - starts with idle icon
-    const activityIcon = this.scene.add
-      .text(x, y - 70, "⏸️", {
-        fontSize: "20px",
-        color: "#ffffff",
-      })
-      .setOrigin(0.5, 0.5)
-      .setDepth(13)
-      .setVisible(true);
-
-    // Make sprite interactive for hover tooltips
-    sprite.setInteractive({ useHandCursor: true });
-
     return {
       def, sprite, marker, label, barBg, barFill,
       progress: 0, targetX: x, targetY: y,
-      speechTimer: 0,
-      activity: "idle",
-      activityDetails: "",
-      activityIcon,
+      speechTimer: 0, activity: "idle",
     };
   }
 
@@ -158,6 +144,9 @@ export class AgentRegistry {
     this.agents.push(entry);
   }
 
+  /** No-op — tooltips are set up in createAgentAt via pointer events */
+  setupTooltips(): void {}
+
   setTarget(agentName: string, zone: ZoneId): void {
     const agent = this.findAgent(agentName);
     if (!agent) return;
@@ -170,7 +159,7 @@ export class AgentRegistry {
     // Handle WORKSHOP with multiple coordinate options
     if (zone === "WORKSHOP" && (z as any).options) {
       const options = (z as any).options as Array<{ x: number; y: number }>;
-      const chosen = options[Math.floor(Math.random() * options.length)];
+      const chosen = options[i % options.length];  // Distribute agents across coordinates
       agent.targetX = chosen.x;
       agent.targetY = chosen.y;
     } else {
@@ -281,100 +270,47 @@ export class AgentRegistry {
     }
   }
 
-  setActivity(agentName: string, activity: AgentActivity, details: string): void {
+
+  setActivity(agentName: string, activity: string, _details: string): void {
     const agent = this.findAgent(agentName);
     if (!agent) return;
-
     agent.activity = activity;
-    agent.activityDetails = details;
-
-    // Update activity icon - always visible
-    if (!agent.activityIcon) return;
-
-    let icon = "";
-    if (activity === "tool_call") {
-      icon = "🔧";
-    } else if (activity === "llm_generating") {
-      icon = "💭";
-    } else {
-      icon = "⏸️"; // Idle state
-    }
-
-    agent.activityIcon.setText(icon).setVisible(true);
-    agent.activityIcon.setPosition(agent.sprite.x, agent.sprite.y - 70);
   }
 
-  setupTooltips(): void {
-    // Setup hover interactions for all agents
-    this.agents.forEach((agent) => {
-      if (!agent.sprite.input) return;
-
-      agent.sprite.on("pointerover", () => {
-        this.showTooltip(agent);
-      });
-
-      agent.sprite.on("pointerout", () => {
-        this.hideTooltip(agent);
-      });
-    });
-  }
-
-  private showTooltip(agent: AgentEntry): void {
-    // Remove existing tooltip if any
-    this.hideTooltip(agent);
-
-    const x = agent.sprite.x;
-    const y = agent.sprite.y - 100;
-
-    // Build tooltip text - show detailed status information
-    let text = "";
-    if (agent.activity === "tool_call" && agent.activityDetails) {
-      // Show which tool is being used
-      text = agent.activityDetails;
-    } else if (agent.activity === "llm_generating" && agent.activityDetails) {
-      // Show LLM output/thinking status
-      text = agent.activityDetails;
-    } else if (agent.activity === "idle") {
-      text = "Idle";
-    } else {
-      // Fallback
-      text = agent.activity === "tool_call" ? "Using tool" : "Thinking...";
-    }
-
-    const tooltipText = this.scene.add
-      .text(0, 0, text, {
-        fontSize: "11px",
-        color: "#ffffff",
-        backgroundColor: "#000000cc",
-        padding: { x: 8, y: 6 },
-        align: "center",
-        wordWrap: { width: 200 },
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(15);
-
-    const container = this.scene.add.container(x, y, [tooltipText]);
-    agent.tooltip = container;
-  }
-
-  private hideTooltip(agent: AgentEntry): void {
-    if (agent.tooltip) {
-      agent.tooltip.destroy();
-      agent.tooltip = undefined;
-    }
-  }
-
-  /** Update activity icon positions as agents move */
+  /** Update activity icon positions and visibility each frame */
   tickActivityIcons(): void {
+    const COLOR_MAP: Record<string, number> = {
+      llm_generating: 0x4488ff,  // blue — thinking
+      tool_call: 0xff8844,       // orange — using tool
+    };
+
     for (const agent of this.agents) {
-      if (agent.activityIcon && agent.activityIcon.visible) {
-        agent.activityIcon.setPosition(agent.sprite.x, agent.sprite.y - 70);
-      }
-      // Update tooltip position if visible
-      if (agent.tooltip) {
-        const x = agent.sprite.x;
-        const y = agent.sprite.y - 100;
-        agent.tooltip.setPosition(x, y);
+      const color = COLOR_MAP[agent.activity];
+      if (color !== undefined) {
+        const ix = agent.sprite.x + 24;
+        const iy = agent.sprite.y - 28;
+        if (!agent.activityIcon) {
+          agent.activityIcon = this.scene.add
+            .circle(ix, iy, 8, color, 1)
+            .setStrokeStyle(2, 0xffffff, 0.9)
+            .setDepth(15);
+          // Pulse animation
+          this.scene.tweens.add({
+            targets: agent.activityIcon,
+            scale: { from: 0.8, to: 1.3 },
+            alpha: { from: 1, to: 0.5 },
+            duration: 600,
+            yoyo: true,
+            repeat: -1,
+          });
+        } else {
+          agent.activityIcon
+            .setPosition(ix, iy)
+            .setFillStyle(color, 1)
+            .setVisible(true);
+        }
+      } else if (agent.activityIcon) {
+        agent.activityIcon.setVisible(false);
       }
     }
   }

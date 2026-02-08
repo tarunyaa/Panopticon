@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-import json
-import threading
-import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Literal
 
 
@@ -62,8 +58,8 @@ class GateRequestedEvent:
     agentName: str = ""
     question: str = ""
     context: str = ""
-    reason: str = ""  # Why this gate is needed
-    gateSource: str = "task_complete"  # "task_complete" | "file_operation" | "terminal_command" | "leader_request"
+    reason: str = ""
+    gateSource: str = "task_complete"
 
 
 @dataclass
@@ -74,7 +70,7 @@ class GateRecommendedEvent:
     reason: str = ""
     context: str = ""
     question: str = ""
-    options: str = ""  # JSON-encoded list of options
+    options: str = ""
     recommendation: str = ""
 
 
@@ -83,15 +79,15 @@ class AgentActivityEvent:
     type: str = "AGENT_ACTIVITY"
     agentName: str = ""
     activity: str = "idle"  # "idle" | "tool_call" | "llm_generating"
-    details: str = ""  # tool name or current task description
+    details: str = ""
 
 
 @dataclass
 class TaskHandoffEvent:
     type: str = "TASK_HANDOFF"
     receivingAgent: str = ""
-    sourceAgents: list = None  # List of agent names whose outputs are being used
-    summary: str = ""  # Brief description of what's being handed off
+    sourceAgents: list = None
+    summary: str = ""
 
     def __post_init__(self):
         if self.sourceAgents is None:
@@ -102,74 +98,3 @@ class TaskHandoffEvent:
 class GateResponse:
     action: str = "approve"   # "approve" | "reject"
     note: str = ""
-
-
-class GateStore:
-    """Thread-safe store for human-in-the-loop gates."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        # run_id -> gate_id -> (Event, GateResponse | None)
-        self._gates: dict[str, dict[str, tuple[threading.Event, GateResponse | None]]] = {}
-
-    def create_gate(self, run_id: str) -> tuple[str, threading.Event]:
-        gate_id = str(uuid.uuid4())
-        event = threading.Event()
-        with self._lock:
-            self._gates.setdefault(run_id, {})[gate_id] = (event, None)
-        return gate_id, event
-
-    def resolve_gate(self, run_id: str, gate_id: str, response: GateResponse) -> bool:
-        with self._lock:
-            run_gates = self._gates.get(run_id, {})
-            entry = run_gates.get(gate_id)
-            if entry is None:
-                return False
-            event, _ = entry
-            run_gates[gate_id] = (event, response)
-        event.set()
-        return True
-
-    def get_response(self, run_id: str, gate_id: str) -> GateResponse | None:
-        with self._lock:
-            run_gates = self._gates.get(run_id, {})
-            entry = run_gates.get(gate_id)
-            if entry is None:
-                return None
-            return entry[1]
-
-    def cleanup(self, run_id: str) -> None:
-        with self._lock:
-            gates = self._gates.pop(run_id, {})
-        # Unblock any stuck threads
-        for event, _ in gates.values():
-            event.set()
-
-
-gate_store = GateStore()
-
-
-class EventBus:
-    """Async event queue for streaming events to WebSocket clients."""
-
-    def __init__(self) -> None:
-        self.queues: dict[str, asyncio.Queue] = {}
-
-    def create_run(self, run_id: str) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue()
-        self.queues[run_id] = q
-        return q
-
-    def get_queue(self, run_id: str) -> asyncio.Queue | None:
-        return self.queues.get(run_id)
-
-    def emit(self, run_id: str, event) -> None:
-        q = self.queues.get(run_id)
-        if q is not None:
-            q.put_nowait(json.dumps(asdict(event)))
-
-    def cleanup(self, run_id: str) -> None:
-        self.queues.pop(run_id, None)
-
-
-event_bus = EventBus()

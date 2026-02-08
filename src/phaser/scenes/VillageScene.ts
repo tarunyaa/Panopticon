@@ -4,7 +4,7 @@ import type { AgentDef } from "../registry/AgentRegistry";
 import { updateMovement } from "../systems/movement";
 import { wsClient } from "../../ws/client";
 import { API_BASE } from "../../config";
-import type { AgentIntentEvent, AgentActivityEvent, WSEvent } from "../../types/events";
+import type { AgentIntentEvent, WSEvent } from "../../types/events";
 import type { AgentInfo } from "../../types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "../../types/agents";
 
@@ -22,6 +22,8 @@ function agentInfoToDef(agent: AgentInfo, index: number): AgentDef {
 export class VillageScene extends Phaser.Scene {
   agentRegistry!: AgentRegistry;
   cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  /** Cache of latest task summary per agent name, used for handoff bubbles */
+  private agentSummaries: Record<string, string> = {};
 
   constructor() {
     super("VillageScene");
@@ -125,7 +127,6 @@ export class VillageScene extends Phaser.Scene {
     // Listen for batch spawn from onboarding flow
     const spawnAgentsHandler = (defs: AgentDef[]) => {
       this.agentRegistry.spawn(defs);
-      this.agentRegistry.setupTooltips();
     };
     this.game.events.on("spawn-agents", spawnAgentsHandler);
 
@@ -133,7 +134,6 @@ export class VillageScene extends Phaser.Scene {
     const agentCreatedHandler = (agent: AgentInfo, index: number) => {
       const def = agentInfoToDef(agent, index);
       this.agentRegistry.spawnOne(def);
-      this.agentRegistry.setupTooltips();
     };
     this.game.events.on("agent-created", agentCreatedHandler);
 
@@ -168,36 +168,36 @@ export class VillageScene extends Phaser.Scene {
     // Listen for all events → handle run lifecycle + task progress
     const eventHandler = (ev: WSEvent) => {
       if (ev.type === "RUN_STARTED") {
+        // Reset summaries cache for the new run
+        this.agentSummaries = {};
         // Gather all agents at CAFE to discuss the incoming task
         this.agentRegistry.moveAllToZone("CAFE");
       } else if (ev.type === "TASK_HANDOFF") {
-        // Dependency handoff - agents meet at CAFE
-        // Move receiving agent to CAFE
+        // Dependency handoff — agents meet at CAFE to exchange outputs
         this.agentRegistry.setTarget(ev.receivingAgent, "CAFE");
 
-        // Move all source agents to CAFE and show handoff bubbles
+        // Source agents return to CAFE and share what they produced
         ev.sourceAgents.forEach((sourceAgent, index) => {
           this.agentRegistry.setTarget(sourceAgent, "CAFE");
-          // Stagger the bubbles slightly so they don't all appear at once
-          this.time.delayedCall(200 * index, () => {
-            this.agentRegistry.showBubble(
-              sourceAgent,
-              `Handing off to ${ev.receivingAgent}`,
-              150
-            );
+          this.time.delayedCall(500 + 1500 * index, () => {
+            const summary = this.agentSummaries[sourceAgent];
+            const bubbleText = summary || `Done, handing off`;
+            this.agentRegistry.showBubble(sourceAgent, bubbleText, 200);
           });
         });
 
-        // Show receiving bubble after sources
-        this.time.delayedCall(200 * ev.sourceAgents.length + 100, () => {
-          const sources = ev.sourceAgents.join(", ");
+        // Receiving agent acknowledges after all sources have spoken
+        const receiveDelay = 500 + 1500 * ev.sourceAgents.length + 500;
+        this.time.delayedCall(receiveDelay, () => {
           this.agentRegistry.showBubble(
             ev.receivingAgent,
-            `Receiving from ${sources}`,
+            `Got it, starting work`,
             150
           );
         });
       } else if (ev.type === "TASK_SUMMARY") {
+        // Cache summary for use in handoff bubbles
+        this.agentSummaries[ev.agentName] = ev.summary;
         // Task done — agent goes idle at DORM (HOUSE is only for gates)
         this.agentRegistry.setTarget(ev.agentName, "DORM");
         this.agentRegistry.setProgress(ev.agentName, 1);

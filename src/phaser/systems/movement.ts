@@ -1,6 +1,6 @@
 import type { AgentRegistry, AgentEntry } from "../registry/AgentRegistry";
 
-const SPEED = 120;
+const SPEED = 360;
 const ARRIVE_THRESHOLD = 4;
 const BAR_WIDTH = 50;
 
