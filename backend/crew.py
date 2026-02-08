@@ -26,7 +26,7 @@ try:
     from .tools import instantiate_tools
     from .planner import plan_task_delegation
     from .gate_policy import should_gate_task_complete
-    from .activity_callbacks import ActivityTracker
+    # from .activity_callbacks import ActivityTracker  # Disabled - CrewAI callbacks not working
 except ImportError:
     # Running as standalone script
     from events import (
@@ -44,7 +44,7 @@ except ImportError:
     from tools import instantiate_tools
     from planner import plan_task_delegation
     from gate_policy import should_gate_task_complete
-    from activity_callbacks import ActivityTracker
+    # from activity_callbacks import ActivityTracker  # Disabled - CrewAI callbacks not working
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -129,7 +129,7 @@ def _make_combined_task_callback(
     state = {"started": False}
 
     def callback(task_output):
-        # On first execution, emit handoff and intent events
+        # On first execution, emit handoff event (intent is now handled by step_callback)
         if not state["started"]:
             state["started"] = True
 
@@ -145,15 +145,7 @@ def _make_combined_task_callback(
                     ),
                 )
 
-            # Emit intent event
-            event_bus.emit(
-                run_id,
-                AgentIntentEvent(
-                    agentName=agent_name,
-                    zone="WORKSHOP",
-                    message=f"Started working as {role.strip().lower()}.",
-                ),
-            )
+            # Note: AgentIntentEvent now emitted by step_callback for immediate updates
 
         # Handle task completion
         cleaned = _clean_crewai_output(str(task_output))
@@ -277,21 +269,42 @@ def run_crew(run_id: str, prompt: str, mode: GatingMode = "BALANCED") -> str:
 
             # For the Leader, enhance backstory with delegation rules
             backstory = config["backstory"].strip()
+
+            # Add conciseness instruction for faster responses
+            backstory += "\n\nIMPORTANT: Be concise. Provide focused, direct outputs without unnecessary elaboration."
+
             if is_leader and delegation_rules:
                 backstory += f"\n\n## EXECUTION MODE - DELEGATION PROTOCOL\n\n{delegation_rules}"
 
-            # Create activity tracker for this agent
-            activity_tracker = ActivityTracker(run_id, agent_name)
+            # Create step callback to emit intent when agent STARTS working
+            def make_step_callback(agent_nm, agent_role):
+                fired = {"done": False}
+                def callback(step_output):
+                    if not fired["done"]:
+                        fired["done"] = True
+                        event_bus.emit(
+                            run_id,
+                            AgentIntentEvent(
+                                agentName=agent_nm,
+                                zone="WORKSHOP",
+                                message=f"Started working as {agent_role.strip().lower()}.",
+                            ),
+                        )
+                return callback
 
             agent = Agent(
                 role=config["role"].strip(),
                 goal=config["goal"].strip(),
                 backstory=backstory,
                 verbose=True,
-                llm=LLM(model="claude-sonnet-4-5-20250929", api_key=os.environ.get("ANTHROPIC_API_KEY")),
+                llm=LLM(
+                    model="claude-sonnet-4-5-20250929",
+                    api_key=os.environ.get("ANTHROPIC_API_KEY"),
+                    max_tokens=2000  # Limit response length for faster outputs
+                ),
                 tools=agent_tools,
                 allow_delegation=is_leader,  # Only Leader can delegate
-                callbacks=[activity_tracker],
+                step_callback=make_step_callback(agent_name, config["role"]),
             )
 
             agents[key] = agent

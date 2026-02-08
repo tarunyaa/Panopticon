@@ -105,6 +105,10 @@ class CreateDelegationPlanTool(BaseTool):
                 if "async_execution" not in task:
                     return f"Error: task[{i}] missing 'async_execution'"
 
+                # Enforce async_execution=false for all tasks (CrewAI bug workaround)
+                if task["async_execution"] is not False:
+                    return f"Error: task[{i}] must have async_execution=false (required due to CrewAI bug with hierarchical delegation + tool calling)"
+
                 if "dependencies" not in task:
                     return f"Error: task[{i}] missing 'dependencies'"
 

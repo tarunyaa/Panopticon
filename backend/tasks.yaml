@@ -1,7 +1,7 @@
-carlos_task:
+ayesha_task:
   description: Coordinate team members and ensure objectives are met.
   expected_output: Successful team coordination and project completion.
-  agent: carlos
+  agent: ayesha
 abigail_task:
   description: 'Research the following topic thoroughly. Gather key facts, statistics
     with sources, expert quotes or perspectives, real-world examples, current trends,
@@ -10,15 +10,15 @@ abigail_task:
     with source citations, notable quotes or perspectives, concrete examples, and
     a summary of current trends and debates.
   agent: abigail
-isabella_task:
+carlos_task:
   description: 'Analyze the target audience and design the content approach for the
     following request. Define the angle, outline the structure with section descriptions,
     identify key messages, set tone guidelines, and suggest SEO keywords: {prompt}'
   expected_output: A content strategy with target audience profile, chosen angle with
     rationale, detailed outline with section-by-section descriptions, key messages
     to convey, tone and style guidelines, and target SEO keywords.
-  agent: isabella
-klaus_task:
+  agent: carlos
+isabella_task:
   description: 'Using the research findings and content strategy from your teammates,
     write the final polished piece for the following request. Weave in facts and examples
     from the research, follow the structure and tone from the strategy, and ensure
@@ -26,4 +26,4 @@ klaus_task:
   expected_output: Complete, publication-ready content with proper formatting, facts
     and examples woven into the narrative, citations where appropriate, and a compelling
     arc from introduction to conclusion.
-  agent: klaus
+  agent: isabella

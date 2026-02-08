@@ -4,7 +4,7 @@ import type { AgentDef } from "../registry/AgentRegistry";
 import { updateMovement } from "../systems/movement";
 import { wsClient } from "../../ws/client";
 import { API_BASE } from "../../config";
-import type { AgentIntentEvent, AgentActivityEvent, WSEvent } from "../../types/events";
+import type { AgentIntentEvent, WSEvent } from "../../types/events";
 import type { AgentInfo } from "../../types/agents";
 import { ALL_SPRITES, PHASER_COLORS } from "../../types/agents";
 
@@ -125,7 +125,6 @@ export class VillageScene extends Phaser.Scene {
     // Listen for batch spawn from onboarding flow
     const spawnAgentsHandler = (defs: AgentDef[]) => {
       this.agentRegistry.spawn(defs);
-      this.agentRegistry.setupTooltips();
     };
     this.game.events.on("spawn-agents", spawnAgentsHandler);
 
@@ -133,7 +132,6 @@ export class VillageScene extends Phaser.Scene {
     const agentCreatedHandler = (agent: AgentInfo, index: number) => {
       const def = agentInfoToDef(agent, index);
       this.agentRegistry.spawnOne(def);
-      this.agentRegistry.setupTooltips();
     };
     this.game.events.on("agent-created", agentCreatedHandler);
 
@@ -205,9 +203,6 @@ export class VillageScene extends Phaser.Scene {
       } else if (ev.type === "RUN_FINISHED") {
         // All done — agents return to DORM (idle)
         this.agentRegistry.moveAllToZone("DORM");
-      } else if (ev.type === "AGENT_ACTIVITY") {
-        // Update agent activity state
-        this.agentRegistry.setActivity(ev.agentName, ev.activity, ev.details);
       }
     };
     wsClient.on("event", eventHandler);
@@ -230,7 +225,6 @@ export class VillageScene extends Phaser.Scene {
     updateMovement(this.agentRegistry);
     this.agentRegistry.tickProgress();
     this.agentRegistry.tickBubbles();
-    this.agentRegistry.tickActivityIcons();
 
     // Arrow-key panning
     const panSpeed = 8;

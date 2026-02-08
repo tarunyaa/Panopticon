@@ -1,4 +1,4 @@
-carlos:
+ayesha:
   role: Leader
   goal: Lead and coordinate the team
   backstory: The team leader who oversees all operations.
@@ -13,10 +13,8 @@ abigail:
     track current trends. You organize raw material so writers can focus on craft
     rather than fact-finding. You work independently and can start immediately without
     waiting for other team members.
-  tools:
-  - web_search
-  - web_scraper
-isabella:
+  tools: []
+carlos:
   role: Content Strategist
   goal: Design content structure and strategy that maximizes audience engagement and
     impact
@@ -26,10 +24,8 @@ isabella:
     about SEO, audience intent, tone, and narrative arc before a single word is drafted.
     You work independently and can start immediately without waiting for detailed
     research.
-  tools:
-  - web_search
-  - web_scraper
-klaus:
+  tools: []
+isabella:
   role: Senior Writer
   goal: Produce polished, publication-quality content by weaving together research
     and strategy
@@ -38,6 +34,4 @@ klaus:
     tone to audience, and ensure every section delivers on its purpose. You produce
     publication-ready content that is engaging, accurate, and well-structured. You
     need both the research brief and content strategy before you can begin writing.
-  tools:
-  - web_search
-  - file_writer
+  tools: []

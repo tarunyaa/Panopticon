@@ -8,9 +8,11 @@ interface Props {
   agents: AgentInfo[];
 }
 
-/** Events worth showing in the log (skip WORLD_SNAPSHOT) */
+/** Events worth showing in the log (skip verbose/frequent events) */
 function isVisible(ev: WSEvent): boolean {
-  return ev.type !== "WORLD_SNAPSHOT";
+  // Skip WORLD_SNAPSHOT and AGENT_OUTPUT (too verbose/frequent)
+  // TASK_SUMMARY provides better summaries anyway
+  return ev.type !== "WORLD_SNAPSHOT" && ev.type !== "AGENT_OUTPUT";
 }
 
 export function EventFeed({ agents }: Props) {
@@ -41,7 +43,8 @@ export function EventFeed({ agents }: Props) {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Use 'auto' instead of 'smooth' for faster scrolling
+    bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [events]);
 
   return (
